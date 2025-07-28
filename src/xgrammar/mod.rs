@@ -1,11 +1,9 @@
 #![allow(dead_code)]
-pub mod tokenizer_info;
 mod huggingface;
+pub mod tokenizer_info;
 
 pub struct GrammarCompiler {}
 
 pub struct CompiledGrammar {}
 
-impl GrammarCompiler {
-
-}
+impl GrammarCompiler {}

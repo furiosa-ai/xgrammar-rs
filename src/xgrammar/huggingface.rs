@@ -18,8 +18,16 @@ pub mod hub {
     };
     pub use hf_hub::{Repo, RepoType};
 
-    use super::HuggingfaceError;
+    pub fn compile_glob_pattern(patterns: &[&str]) -> Result<Vec<GlobMatcher>, globset::Error> {
+        let compiled_patterns = patterns
+            .into_iter()
+            .map(|s| Glob::new(s).map(|g| g.compile_matcher()))
+            .collect::<Result<Vec<GlobMatcher>, globset::Error>>()?;
 
+        Ok(compiled_patterns)
+    }
+
+    #[derive(Debug, Clone, Default)]
     pub struct DownloadOptions {
         // TODO - add expected model_kind to prevent downloading a large model unnecessarily
         pub allow_patterns: Option<Vec<GlobMatcher>>,
@@ -27,30 +35,6 @@ pub mod hub {
     }
 
     impl DownloadOptions {
-        pub fn new(
-            allow_patterns: Option<Vec<&str>>,
-            ignore_patterns: Option<Vec<&str>>,
-        ) -> Result<Self, HuggingfaceError> {
-            fn convert_patterns(
-                patterns: Option<Vec<&str>>,
-            ) -> Result<Option<Vec<GlobMatcher>>, HuggingfaceError> {
-                if let Some(patterns) = patterns {
-                    let compiled_patterns = patterns
-                        .into_iter()
-                        .map(|s| Glob::new(s).map(|g| g.compile_matcher()))
-                        .collect::<Result<Vec<GlobMatcher>, globset::Error>>()?;
-
-                    Ok(Some(compiled_patterns))
-                } else {
-                    Ok(None)
-                }
-            }
-
-            Ok(Self {
-                allow_patterns: convert_patterns(allow_patterns)?,
-                ignore_patterns: convert_patterns(ignore_patterns)?,
-            })
-        }
         pub fn is_matched(&self, filename: &str) -> bool {
             // Referred from https://github.com/huggingface/huggingface_hub/blob/a09927331ec0ed2df90968da2200c6bef8ab4117/src/huggingface_hub/utils/_paths.py#L124
             if let Some(patterns) = &self.allow_patterns {
@@ -103,6 +87,7 @@ pub mod hub {
         use hf_hub::RepoType;
 
         use super::*;
+        use crate::xgrammar::huggingface::HuggingfaceError;
 
         #[allow(clippy::unnecessary_to_owned)]
         fn assert_snapshot_download(
@@ -179,7 +164,10 @@ pub mod hub {
                 "tokenizer_config.json",
             ];
 
-            let filters = DownloadOptions::new(Some(expected.to_vec()), None)?;
+            let filters = DownloadOptions {
+                allow_patterns: Some(compile_glob_pattern(&expected).unwrap()),
+                ..Default::default()
+            };
             assert_snapshot_download(repo, Some(filters), &expected)
         }
 
@@ -187,11 +175,20 @@ pub mod hub {
         #[test]
         fn test_snapshot_download_with_ignore_patterns() -> Result<(), HuggingfaceError> {
             let repo = Repo::new("google-t5/t5-small".to_string(), RepoType::Model);
-            let filters = DownloadOptions::new(
-                None,
-                Some(vec!["*.ot", "onnx/*", "*.msgpack", "*.h5", "spiece.model", "*.bin"]),
-            )
-            .unwrap();
+            let filters = DownloadOptions {
+                ignore_patterns: Some(
+                    compile_glob_pattern(&[
+                        "*.ot",
+                        "onnx/*",
+                        "*.msgpack",
+                        "*.h5",
+                        "spiece.model",
+                        "*.bin",
+                    ])
+                    .unwrap(),
+                ),
+                ..Default::default()
+            };
             let expected = [
                 ".gitattributes",
                 "README.md",

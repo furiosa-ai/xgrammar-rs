@@ -1,10 +1,10 @@
 use std::{collections::HashMap, ffi::CString};
 
 use cpp::{cpp, cpp_class};
+use huggingface::hub::{DownloadOptions, Repo, RepoType, compile_glob_pattern, snapshot_download};
 use tokenizers;
 pub use tokenizers::FromPretrainedParameters;
-use tokenizers::tokenizer::{Result, Tokenizer};
-use huggingface::hub::{Repo, RepoType, DownloadOptions, snapshot_download};
+use tokenizers::tokenizer::Tokenizer;
 
 use crate::xgrammar::huggingface;
 
@@ -41,6 +41,8 @@ pub struct MetadataFromHF {
     pub add_prefix_space: bool,
 }
 
+static TOKENIZER_GLOB_PATTERN: &[&str] = &["tokenizer_config.json"];
+
 impl TokenizerInfo {
     #[allow(dead_code)]
     pub fn from_pretrained(
@@ -48,47 +50,44 @@ impl TokenizerInfo {
         pretrained_params: Option<FromPretrainedParameters>,
         vocab_size: Option<usize>,
         _stop_token_ids: Option<Vec<i32>>,
-    ) -> Result<TokenizerInfo> {
-        let download_option = DownloadOptions::new(
-            Some(vec!["tokenizer.json", "tokenizer_config.json"]),
-            None
-        ).unwrap();
+    ) -> Result<TokenizerInfo, huggingface::HuggingfaceError> {
+        // If fails, it must be a bug.
+        let allow_patterns = compile_glob_pattern(TOKENIZER_GLOB_PATTERN)
+            .expect("failed to compile the glob patterns for tokenizer files");
+        let download_options =
+            Some(DownloadOptions { allow_patterns: Some(allow_patterns), ..Default::default() });
         let repo = Repo::new(tokenizer_id.to_string(), RepoType::Model);
-        let tokenizer_path = snapshot_download(
-            repo,
-            Some(download_option),
-        ).unwrap();
+        let tokenizer_path = snapshot_download(repo, download_options)?;
 
         let tokenizer = Tokenizer::from_pretrained(tokenizer_id, pretrained_params)
             .expect("Failed to load tokenizer");
         let vocab_map: HashMap<String, u32> = tokenizer.get_vocab(false);
 
         let stop_token_ids: Vec<i32> = if let Some(stop_token_ids) = _stop_token_ids {
+            // Check if the provided stop_token_ids are in the vocab_map
             stop_token_ids
         } else {
             let tokenizer_config_path = tokenizer_path.join("tokenizer_config.json");
             tracing::debug!("Reading tokenizer config from: {:?}", tokenizer_config_path);
             let reader = std::fs::File::open(tokenizer_config_path)
                 .expect("Failed to open tokenizer config file");
-            let tokenizer_config: serde_json::Map<String, serde_json::Value> = serde_json::from_reader(reader)
-                .expect("Failed to parse tokenizer config");
-            let eos_token = tokenizer_config.get("eos_token").unwrap().to_string();
-            vocab_map.get(&eos_token)
+            let tokenizer_config: serde_json::Map<String, serde_json::Value> =
+                serde_json::from_reader(reader).expect("Failed to parse tokenizer config");
+            let eos_token = tokenizer_config.get("eos_token").unwrap().as_str().unwrap().to_owned();
+            tracing::debug!("eos_token: {:?}", eos_token);
+            vocab_map
+                .get(&eos_token)
                 .map(|&id| vec![id as i32])
-                .expect("EOS token not found in vocab")
+                .expect("EOS token not found in vocab") // TODO: return error
         };
         tracing::debug!("stop_token_ids: {:?}", stop_token_ids);
 
         // Some tokenizer don't have token id 0 or 1 or 2. So the max_id could be larger than the
         // number of tokens.
-        let max_id = *vocab_map.values().max()
-            .expect("msg: Failed to get max vocab id") as usize;
+        let max_id = *vocab_map.values().max().expect("msg: Failed to get max vocab id") as usize;
         let tokenizer_vocab_size = std::cmp::max(vocab_map.len(), max_id + 1);
-        let vocab_size: usize = if let Some(size) = vocab_size {
-            size
-        } else {
-            tokenizer_vocab_size
-        };
+        let vocab_size: usize =
+            if let Some(size) = vocab_size { size } else { tokenizer_vocab_size };
 
         // Ensure the vocab size is at least as large as the max id in the vocab map
         let mut encoded_vocab = vec![CString::new("").unwrap(); vocab_size];
@@ -96,18 +95,51 @@ impl TokenizerInfo {
         // Fill the encoded_vocab with tokens from the vocab_map
         for (token, idx) in vocab_map.iter() {
             assert!((*idx as usize) < vocab_size);
-            encoded_vocab[*idx as usize] = CString::new(token.as_str())
-                .expect("fail to convert a token to CString");
+            encoded_vocab[*idx as usize] =
+                CString::new(token.as_str()).expect("fail to convert a token to CString");
         }
 
-        let _encoded_vocab = vocab_map.keys().map(|token| {
-            CString::new(token.as_str()).expect("failed to convert token to CString")
-        }).collect::<Vec<CString>>();
+        let encoded_vocab = vocab_map
+            .keys()
+            .map(|token| CString::new(token.as_str()).expect("failed to convert token to CString"))
+            .collect::<Vec<CString>>();
+        let encoded_vocab_ptr: Vec<_> = encoded_vocab.iter().map(|s| s.as_ptr()).collect();
 
-        let _backend_str = tokenizer.to_string(false)
-            .expect("fail to get the backend_str from tokenizer");
+        let backend_str =
+            tokenizer.to_string(false).expect("fail to get the backend_str from tokenizer");
+        let tokenizer_metadata = TokenizerInfo::detect_metadata_from_hf(&backend_str);
 
-        unimplemented!()
+        let vocab_size_i32 = vocab_size as i32;
+        let encoded_vocab_ptr_ptr = encoded_vocab_ptr.as_ptr();
+        let vocab_type = tokenizer_metadata.vocab_type;
+        let add_prefix_space = tokenizer_metadata.add_prefix_space;
+        let stop_token_ids_ptr = stop_token_ids.as_ptr();
+        let stop_token_ids_len = stop_token_ids.len();
+
+        let tokenizer_info = cpp!(unsafe [
+            encoded_vocab_ptr_ptr as "const char* const*",
+            vocab_type as "xgrammar::VocabType",
+            vocab_size_i32 as "int",
+            stop_token_ids_ptr as "const int32_t*",
+            stop_token_ids_len as "size_t",
+            add_prefix_space as "bool"
+        ] -> TokenizerInfo as "xgrammar::TokenizerInfo" {
+            std::vector<std::string> encoded_vocab;
+            for (int i = 0; i < vocab_size_i32; ++i) {
+                encoded_vocab.push_back(std::string(encoded_vocab_ptr_ptr[i]));
+            }
+            std::vector<int32_t> stop_token_ids(stop_token_ids_ptr, stop_token_ids_ptr + stop_token_ids_len);
+
+            return xgrammar::TokenizerInfo(
+                encoded_vocab,
+                vocab_type,
+                vocab_size_i32,
+                stop_token_ids,
+                add_prefix_space
+            );
+        });
+
+        Ok(tokenizer_info)
     }
 
     // // VocabType GetVocabType() const;
@@ -132,9 +164,8 @@ impl TokenizerInfo {
     }
 
     pub fn detect_metadata_from_hf(backend_str: &str) -> MetadataFromHF {
-
-        let backend_str = CString::new(backend_str)
-            .expect("Failed to convert backend_str to CString");
+        let backend_str =
+            CString::new(backend_str).expect("Failed to convert backend_str to CString");
         let backend_str_ptr = backend_str.as_ptr();
 
         cpp!(unsafe [backend_str_ptr as "const char*"] -> MetadataFromHF as "MetadataFromHF" {
@@ -153,26 +184,30 @@ impl TokenizerInfo {
             return metadata_from_hf;
         })
     }
-
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::xgrammar::tokenizer_info::{TokenizerInfo, VocabType};
+    use std::u32;
+
     use tokenizers::FromPretrainedParameters;
     use tracing::Level;
     use tracing_subscriber;
+
+    use crate::xgrammar::tokenizer_info::{TokenizerInfo, VocabType};
 
     const EXAONE_4_0_32B_PRETRAINED_ID: &str = "LGAI-EXAONE/EXAONE-4.0-32B";
 
     #[test]
     fn test_tokenizer_info() {
-        tracing_subscriber::fmt()
-            .with_max_level(Level::DEBUG)
-            .init();
+        tracing_subscriber::fmt().with_max_level(Level::DEBUG).init();
 
-        let _ = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
-            .expect("Failed to load tokenizer info");
+        let tok_info =
+            TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
+                .expect("Failed to load tokenizer info");
+        assert_eq!(tok_info.get_vocab_type(), VocabType::ByteLevel);
+        assert!(!tok_info.get_add_prefix_space());
+        assert_eq!(tok_info.get_vocab_size(), 102400);
     }
 
     fn assert_vocab_type_prepend_space(
@@ -182,16 +217,14 @@ mod tests {
     ) {
         use tokenizers::tokenizer::Tokenizer;
 
-        let param = std::env::var("HF_TOKEN").map(|token| {
-            FromPretrainedParameters {
-                token: Some(token),
-                ..Default::default()
-            }
-        }).unwrap_or_default();
+        let param = std::env::var("HF_TOKEN")
+            .map(|token| FromPretrainedParameters { token: Some(token), ..Default::default() })
+            .unwrap_or_default();
 
         let tokenizer = Tokenizer::from_pretrained(tokenizer_id, Some(param))
             .expect("Failed to load tokenizer");
-        let metadata_hf = TokenizerInfo::detect_metadata_from_hf(&tokenizer.to_string(false).unwrap());
+        let metadata_hf =
+            TokenizerInfo::detect_metadata_from_hf(&tokenizer.to_string(false).unwrap());
         assert_eq!(metadata_hf.vocab_type, expected_vocab_type);
         assert_eq!(metadata_hf.add_prefix_space, expected_add_prefix_space);
     }
@@ -244,7 +277,7 @@ mod tests {
 
     #[test]
     fn test_tokenizers() {
-    use tokenizers::tokenizer::Tokenizer;
+        use tokenizers::tokenizer::Tokenizer;
 
         // Example usage of the tokenizers crate
         let tokenizer = Tokenizer::from_pretrained("LGAI-EXAONE/EXAONE-4.0-32B", None)
@@ -260,4 +293,22 @@ mod tests {
         assert_eq!(*tokenizer.get_vocab(false).values().max().unwrap(), 102399);
     }
 
+    #[test]
+    fn test_find_eos_token() {
+        use tokenizers::tokenizer::Tokenizer;
+
+        let tokenizer = Tokenizer::from_pretrained("LGAI-EXAONE/EXAONE-4.0-32B", None)
+            .expect("Failed to load tokenizer");
+        let vocab_map = tokenizer.get_vocab(false);
+
+        // Example EOS token
+        let eos_token = "endofturn";
+        let mut eos_token_id: u32 = u32::MAX;
+        for (token, &id) in vocab_map.iter() {
+            if token.contains(eos_token) {
+                println!("Found EOS token <{}>: {}", id, token);
+            }
+        }
+        vocab_map.get("[|endofturn|]").expect("EOS token not found in vocab");
+    }
 }

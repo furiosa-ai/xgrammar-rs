@@ -1,8 +1,7 @@
 fn main() {
     // Building XGrammar C++ library and linking it to Rust
-    let xgrammar = cmake::Config::new("thirdparty/xgrammar")
-    .define("CMAKE_CXX_COMPILER", "clang++")
-    .build();
+    let xgrammar =
+        cmake::Config::new("thirdparty/xgrammar").define("CMAKE_CXX_COMPILER", "clang++").build();
 
     println!("cargo:rustc-link-search=native={}/build", xgrammar.display());
     println!("cargo:rustc-link-lib=static=xgrammar");
