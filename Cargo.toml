@@ -1,0 +1,24 @@
+[package]
+name = "xgrammar-rs"
+version = "0.1.0"
+authors = ["Hyunsik Choi <hyunsik@furiosa.ai>"]
+edition = "2021"
+
+[dependencies]
+libc = "0.2"
+cpp = "0.5.10"
+globset = "0.4.16"
+hf-hub = "0.4.3"
+serde_json = "1"
+tempfile = "3.20.0"
+thiserror = "2"
+tokenizers = { version = "0.21.2", features = ["http"] }
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"
+
+
+[build-dependencies]
+bindgen = "0.72.0"
+cmake = "0.1.54"
+cpp_build = "0.5.10"
+

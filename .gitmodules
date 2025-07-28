@@ -1,0 +1,3 @@
+[submodule "thirdparty/xgrammar"]
+	path = thirdparty/xgrammar
+	url = https://github.com/mlc-ai/xgrammar.git
