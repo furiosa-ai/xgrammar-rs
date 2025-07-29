@@ -203,7 +203,16 @@ impl GrammarMatcher {
         })
     }
 
-    /// bool FillNextTokenBitmask(DLTensor* next_token_bitmask, int index = 0, bool debug_print = false);
+    /// Get the set of tokens that are acceptable for the next step and store them in a bitmask.
+    ///
+    /// # Arguments
+    /// * `next_token_bitmask` - The bitmask to store the result. The bitmask must be pre-allocated
+    ///   and with shape (GetBitmaskSize(),) and dtype int32.
+    /// * `index` - The index of the bitmask to fill. If None, the first bitmask is filled.
+    /// * `debug_print` - If true, print debug information.
+    ///
+    /// # Returns
+    /// * Whether the bitmask need to be applied (not all-true).
     pub fn fill_next_token_bitmask(
         &mut self,
         next_token_bitmask: &mut DLTensor,

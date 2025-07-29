@@ -20,7 +20,7 @@ pub mod hub {
 
     pub fn compile_glob_pattern(patterns: &[&str]) -> Result<Vec<GlobMatcher>, globset::Error> {
         let compiled_patterns = patterns
-            .into_iter()
+            .iter()
             .map(|s| Glob::new(s).map(|g| g.compile_matcher()))
             .collect::<Result<Vec<GlobMatcher>, globset::Error>>()?;
 
