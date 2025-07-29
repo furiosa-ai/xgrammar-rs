@@ -1,6 +1,7 @@
 use std::{collections::HashMap, ffi::CString};
 
 use cpp::{cpp, cpp_class};
+use dlpark::{traits::TensorView, versioned::SafeManagedTensorVersioned as DLTensor};
 use huggingface::hub::{DownloadOptions, Repo, RepoType, compile_glob_pattern, snapshot_download};
 use tokenizers;
 pub use tokenizers::FromPretrainedParameters;
@@ -9,7 +10,7 @@ use tokenizers::tokenizer::Tokenizer;
 use crate::xgrammar::huggingface;
 
 cpp! {{
-    #include "xgrammar/tokenizer_info.h"
+    #include "xgrammar/xgrammar.h"
     #include <picojson.h>
 
     using namespace std;
@@ -24,6 +25,18 @@ cpp! {{
 
 cpp_class!(
     pub unsafe struct TokenizerInfo as "xgrammar::TokenizerInfo"
+);
+cpp_class!(
+    pub unsafe struct GrammarCompiler as "xgrammar::GrammarCompiler"
+);
+cpp_class!(
+    pub unsafe struct CompiledGrammar as "xgrammar::CompiledGrammar"
+);
+cpp_class!(
+    pub unsafe struct Grammar as "xgrammar::Grammar"
+);
+cpp_class!(
+    pub unsafe struct GrammarMatcher as "xgrammar::GrammarMatcher"
 );
 
 #[repr(i32)]
@@ -43,8 +56,214 @@ pub struct MetadataFromHF {
 
 static TOKENIZER_GLOB_PATTERN: &[&str] = &["tokenizer_config.json"];
 
+impl CompiledGrammar {
+    pub fn get_grammar(&self) -> Grammar {
+        cpp!(unsafe [self as "const xgrammar::CompiledGrammar*"] -> Grammar as "xgrammar::Grammar" {
+            return self->GetGrammar();
+        })
+    }
+
+    /// Return the tokenizer info associated with this compiled grammar.
+    pub fn get_tokenizer_info(&self) -> TokenizerInfo {
+        cpp!(unsafe [self as "const xgrammar::CompiledGrammar*"] -> TokenizerInfo as "xgrammar::TokenizerInfo" {
+            return self->GetTokenizerInfo();
+        })
+    }
+
+    /// Return the approximate memory usage of the grammar in bytes.
+    pub fn memory_size_bytes(&self) -> usize {
+        cpp!(unsafe [self as "const xgrammar::CompiledGrammar*"] -> usize as "size_t" {
+            return self->MemorySizeBytes();
+        })
+    }
+}
+
+impl GrammarCompiler {
+    pub fn new(tokenizer_info: &TokenizerInfo) -> Self {
+        Self::with(tokenizer_info, None, None, None)
+    }
+
+    pub fn with(
+        tokenizer_info: &TokenizerInfo,
+        max_threads: Option<usize>,
+        cache_enabled: Option<bool>,
+        max_memory_bytes: Option<usize>,
+    ) -> Self {
+        let max_threads = max_threads.unwrap_or(1) as i32;
+        let cache_enabled = cache_enabled.unwrap_or(true);
+        let max_memory_bytes: i64 = max_memory_bytes.map(|v| v as i64).unwrap_or(-1);
+
+        let grammar_compiler = cpp!(unsafe [
+            tokenizer_info as "const xgrammar::TokenizerInfo*",
+            max_threads as "int",
+            cache_enabled as "bool",
+            max_memory_bytes as "long long"
+        ] -> GrammarCompiler as "xgrammar::GrammarCompiler" {
+            return xgrammar::GrammarCompiler(
+                *tokenizer_info,
+                max_threads,
+                cache_enabled,
+                max_memory_bytes
+            );
+        });
+
+        grammar_compiler
+    }
+
+    /// Get the compiled grammar for pure JSON.
+    pub fn compile_builtin_json_grammar(&mut self) -> CompiledGrammar {
+        cpp!(unsafe [self as "xgrammar::GrammarCompiler*"] -> CompiledGrammar as "xgrammar::CompiledGrammar" {
+            return self->CompileBuiltinJSONGrammar();
+        })
+    }
+}
+
+impl GrammarMatcher {
+    pub fn with(
+        compiled_grammar: &CompiledGrammar,
+        override_stop_tokens: Option<Vec<i32>>,
+        terminate_without_stop_token: Option<bool>,
+        max_rollback_tokens: Option<i32>,
+    ) -> Self {
+        // Keep it sync with the C++ implementation:
+        // https://github.com/mlc-ai/xgrammar/blob/95bdfce011506ea95306b37d080115a2da3e369a/cpp/grammar_matcher.cc#L257
+        let terminate_without_stop_token = terminate_without_stop_token.unwrap_or(false);
+        let max_rollback_tokens = max_rollback_tokens.unwrap_or(0);
+        let override_stop_tokens_ptr =
+            override_stop_tokens.as_ref().map_or(std::ptr::null(), |v| v.as_ptr());
+        let override_stop_tokens_len = override_stop_tokens.as_ref().map_or(0, |v| v.len());
+
+        cpp!(unsafe [
+            compiled_grammar as "const xgrammar::CompiledGrammar*",
+            override_stop_tokens_ptr as "const int32_t*",
+            override_stop_tokens_len as "size_t",
+            terminate_without_stop_token as "bool",
+            max_rollback_tokens as "int"
+        ] -> GrammarMatcher as "xgrammar::GrammarMatcher" {
+            std::optional<std::vector<int32_t>> opt_override_stop_tokens;
+            if (override_stop_tokens_len > 0) {
+                opt_override_stop_tokens = std::vector<int32_t>(
+                    *override_stop_tokens_ptr,
+                    *override_stop_tokens_ptr + override_stop_tokens_len
+                );
+            } else {
+                opt_override_stop_tokens = std::nullopt;
+            }
+
+            return xgrammar::GrammarMatcher(
+                *compiled_grammar,
+                opt_override_stop_tokens,
+                terminate_without_stop_token,
+                max_rollback_tokens
+            );
+        })
+    }
+
+    /// Accept one token and update the state of the matcher.
+    ///
+    /// # Arguments
+    /// * `token_id` - The id of the token to accept.
+    /// * `debug_print` - If true, print debug information.
+    ///
+    /// # Returns
+    /// * Whether the token is accepted.
+    ///
+    /// # Note
+    /// Termination state.
+    ///
+    /// When the end of the root rule is reached, the matcher can only accept the stop token.
+    /// The matcher is terminated after accepting the stop token, i.e. no AcceptToken or
+    /// FindNextTokenMask operations can be performed. The termination state can be canceled
+    /// using rollback().
+    pub fn accept_token(&mut self, token_id: i32, debug_print: Option<bool>) -> bool {
+        let debug_print = debug_print.unwrap_or(false);
+        cpp!(unsafe [self as "xgrammar::GrammarMatcher*", token_id as "int32_t", debug_print as "bool"] -> bool as "bool" {
+            return self->AcceptToken(token_id, debug_print);
+        })
+    }
+
+    /// Accept a string and update the state of the matcher. The whole string is considered
+    /// as one step in rollback. It is used to complement the functionality of `accept_token()`,
+    /// and `accept_token()` should always be used to accept tokens.
+    ///
+    /// # Arguments
+    /// * `input_str` - The string to be accepted.
+    /// * `debug_print` - Whether to print information about the internal state of the matcher.
+    ///
+    /// # Returns
+    /// * Whether the string is accepted.
+    pub fn accept_string(&mut self, input_str: &str, debug_print: Option<bool>) -> bool {
+        let debug_print = debug_print.unwrap_or(false);
+        let input_str_cstring =
+            CString::new(input_str).expect("Failed to convert input_str to CString");
+        let input_str_ptr = input_str_cstring.as_ptr();
+
+        cpp!(unsafe [self as "xgrammar::GrammarMatcher*", input_str_ptr as "const char*", debug_print as "bool"] -> bool as "bool" {
+            return self->AcceptString(input_str_ptr, debug_print);
+        })
+    }
+
+    /// bool FillNextTokenBitmask(DLTensor* next_token_bitmask, int index = 0, bool debug_print = false);
+    pub fn fill_next_token_bitmask(
+        &mut self,
+        next_token_bitmask: &mut DLTensor,
+        index: Option<usize>,
+        debug_print: Option<bool>,
+    ) -> bool {
+        let dl_tensor = next_token_bitmask.dl_tensor();
+        let index = index.unwrap_or(0) as i32;
+        let debug_print = debug_print.unwrap_or(false);
+
+        cpp!(unsafe [self as "xgrammar::GrammarMatcher*", dl_tensor as "DLTensor*", index as "int32_t", debug_print as "bool"] -> bool as "bool" {
+            return self->FillNextTokenBitmask(dl_tensor, index, debug_print);
+        })
+    }
+
+    /// Find the jump-forward string for jump-forward decoding. This is the longest string that
+    /// will be valid according to the current syntax.
+    ///
+    /// # Note
+    /// This method does not change the grammar state.
+    pub fn find_jump_forward_string(&self) -> String {
+        // cpp!(unsafe [self as "const xgrammar::GrammarMatcher*"] -> String as "std::string" {
+        //     return self->FindJumpForwardString();
+        // })
+        unimplemented!()
+    }
+
+    /// Rollback the matcher to a previous state.
+    ///
+    /// # Arguments
+    /// * `num_tokens` - The number of tokens to rollback. It cannot exceed the current number of
+    ///   steps, nor can it exceed the specified maximum number of rollback tokens.
+    pub fn rollback(&mut self, num_tokens: Option<i32>) {
+        let num_tokens = num_tokens.unwrap_or(1);
+        cpp!(unsafe [self as "xgrammar::GrammarMatcher*", num_tokens as "int"] {
+            self->Rollback(num_tokens);
+        })
+    }
+
+    /// Check if the matcher has accepted the stop token and terminated.
+    pub fn is_terminated(&self) -> bool {
+        cpp!(unsafe [self as "const xgrammar::GrammarMatcher*"] -> bool as "bool" {
+            return self->IsTerminated();
+        })
+    }
+
+    /// Get the maximum number of rollback tokens allowed.
+    pub fn get_max_rollback_tokens(&self) -> i32 {
+        cpp!(unsafe [self as "const xgrammar::GrammarMatcher*"] -> i32 as "int" {
+            return self->GetMaxRollbackTokens();
+        })
+    }
+
+    /// const std::vector<int>& GetStopTokenIds() const;
+    pub fn get_stop_token_ids(&self) -> Vec<i32> {
+        unimplemented!()
+    }
+}
+
 impl TokenizerInfo {
-    #[allow(dead_code)]
     pub fn from_pretrained(
         tokenizer_id: &str,
         pretrained_params: Option<FromPretrainedParameters>,
@@ -68,19 +287,19 @@ impl TokenizerInfo {
             stop_token_ids
         } else {
             let tokenizer_config_path = tokenizer_path.join("tokenizer_config.json");
-            tracing::debug!("Reading tokenizer config from: {:?}", tokenizer_config_path);
+            tracing::trace!("Reading tokenizer config from: {:?}", tokenizer_config_path);
             let reader = std::fs::File::open(tokenizer_config_path)
                 .expect("Failed to open tokenizer config file");
             let tokenizer_config: serde_json::Map<String, serde_json::Value> =
                 serde_json::from_reader(reader).expect("Failed to parse tokenizer config");
             let eos_token = tokenizer_config.get("eos_token").unwrap().as_str().unwrap().to_owned();
-            tracing::debug!("eos_token: {:?}", eos_token);
+            tracing::trace!("Found eos_token: {:?}", eos_token);
             vocab_map
                 .get(&eos_token)
                 .map(|&id| vec![id as i32])
                 .expect("EOS token not found in vocab") // TODO: return error
         };
-        tracing::debug!("stop_token_ids: {:?}", stop_token_ids);
+        tracing::trace!("stop_token_ids: {:?}", stop_token_ids);
 
         // Some tokenizer don't have token id 0 or 1 or 2. So the max_id could be larger than the
         // number of tokens.
@@ -188,15 +407,27 @@ impl TokenizerInfo {
 
 #[cfg(test)]
 mod tests {
-    use std::u32;
-
     use tokenizers::FromPretrainedParameters;
     use tracing::Level;
     use tracing_subscriber;
 
-    use crate::xgrammar::tokenizer_info::{TokenizerInfo, VocabType};
+    use crate::xgrammar::{GrammarCompiler, TokenizerInfo, VocabType};
 
     const EXAONE_4_0_32B_PRETRAINED_ID: &str = "LGAI-EXAONE/EXAONE-4.0-32B";
+
+    #[test]
+    fn test_grammar_compiler() {
+        tracing_subscriber::fmt().with_max_level(Level::TRACE).init();
+        let tok_info =
+            TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
+                .expect("Failed to load tokenizer info");
+        let mut compiler = GrammarCompiler::new(&tok_info);
+        let compiled_grammar = compiler.compile_builtin_json_grammar();
+
+        assert_eq!(compiled_grammar.memory_size_bytes(), 380204);
+        assert_eq!(compiled_grammar.get_tokenizer_info().get_vocab_size(), 102400);
+        assert_eq!(compiled_grammar.get_tokenizer_info().get_vocab_type(), VocabType::ByteLevel);
+    }
 
     #[test]
     fn test_tokenizer_info() {
@@ -291,24 +522,5 @@ mod tests {
 
         assert_eq!(tokenizer.get_vocab_size(false), 102400);
         assert_eq!(*tokenizer.get_vocab(false).values().max().unwrap(), 102399);
-    }
-
-    #[test]
-    fn test_find_eos_token() {
-        use tokenizers::tokenizer::Tokenizer;
-
-        let tokenizer = Tokenizer::from_pretrained("LGAI-EXAONE/EXAONE-4.0-32B", None)
-            .expect("Failed to load tokenizer");
-        let vocab_map = tokenizer.get_vocab(false);
-
-        // Example EOS token
-        let eos_token = "endofturn";
-        let mut eos_token_id: u32 = u32::MAX;
-        for (token, &id) in vocab_map.iter() {
-            if token.contains(eos_token) {
-                println!("Found EOS token <{}>: {}", id, token);
-            }
-        }
-        vocab_map.get("[|endofturn|]").expect("EOS token not found in vocab");
     }
 }
