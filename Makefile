@@ -5,7 +5,7 @@ lint:
 
 	# Checking a production build
 	cargo -q clippy ${MAYBE_RELEASE_FLAG} --all-targets \
-		--workspace --locked --features rngd \
+		--workspace --locked \
 		-- -D warnings
 
 do-lint:
