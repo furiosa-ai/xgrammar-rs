@@ -1,10 +1,10 @@
-mod huggingface;
+pub mod huggingface_hub;
 
 use std::{collections::HashMap, ffi::CString};
 
 use cpp::{cpp, cpp_class};
 use dlpark::{traits::TensorView, versioned::SafeManagedTensorVersioned as DLTensor};
-use huggingface::hub::{DownloadOptions, Repo, RepoType, compile_glob_pattern, snapshot_download};
+use huggingface_hub::{DownloadOptions, Repo, RepoType, compile_glob_pattern, snapshot_download};
 pub use tokenizers;
 pub use tokenizers::FromPretrainedParameters;
 use tokenizers::tokenizer::Tokenizer;
@@ -278,7 +278,7 @@ impl TokenizerInfo {
         pretrained_params: Option<FromPretrainedParameters>,
         vocab_size: Option<usize>,
         _stop_token_ids: Option<Vec<i32>>,
-    ) -> Result<TokenizerInfo, huggingface::HuggingfaceError> {
+    ) -> Result<TokenizerInfo, huggingface_hub::HuggingfaceError> {
         // If fails, it must be a bug.
         let allow_patterns = compile_glob_pattern(TOKENIZER_GLOB_PATTERN)
             .expect("failed to compile the glob patterns for tokenizer files");
@@ -418,7 +418,6 @@ impl TokenizerInfo {
 mod tests {
     use tokenizers::FromPretrainedParameters;
     use tracing::Level;
-    use tracing_subscriber;
 
     use crate::{GrammarCompiler, TokenizerInfo, VocabType};
 

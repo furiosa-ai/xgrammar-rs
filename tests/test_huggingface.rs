@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
 use hf_hub::RepoType;
-
-use super::*;
-use crate::huggingface::HuggingfaceError;
+use xgrammar::huggingface_hub::{
+    DownloadOptions, HuggingfaceError, Repo, compile_glob_pattern, snapshot_download,
+};
 
 #[allow(clippy::unnecessary_to_owned)]
 fn assert_snapshot_download(

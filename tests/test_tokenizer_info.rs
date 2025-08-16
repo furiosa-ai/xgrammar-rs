@@ -1,5 +1,4 @@
 use tracing::Level;
-use tracing_subscriber;
 use xgrammar::{FromPretrainedParameters, TokenizerInfo, VocabType};
 
 const EXAONE_4_0_32B_PRETRAINED_ID: &str = "LGAI-EXAONE/EXAONE-4.0-32B";
