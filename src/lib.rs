@@ -5,7 +5,7 @@ use std::{collections::HashMap, ffi::CString};
 use cpp::{cpp, cpp_class};
 use dlpark::{traits::TensorView, versioned::SafeManagedTensorVersioned as DLTensor};
 use huggingface::hub::{DownloadOptions, Repo, RepoType, compile_glob_pattern, snapshot_download};
-use tokenizers;
+pub use tokenizers;
 pub use tokenizers::FromPretrainedParameters;
 use tokenizers::tokenizer::Tokenizer;
 
