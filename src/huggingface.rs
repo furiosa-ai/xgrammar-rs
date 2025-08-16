@@ -87,7 +87,7 @@ pub mod hub {
         use hf_hub::RepoType;
 
         use super::*;
-        use crate::xgrammar::huggingface::HuggingfaceError;
+        use crate::huggingface::HuggingfaceError;
 
         #[allow(clippy::unnecessary_to_owned)]
         fn assert_snapshot_download(
