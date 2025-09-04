@@ -4,11 +4,16 @@ version = "0.1.0"
 authors = ["Hyunsik Choi <hyunsik@furiosa.ai>"]
 edition = "2021"
 
+[features]
+default = ["hf_hub"]
+hf_hub = ["dep:hf-hub"]
+auto-init = []
+
 [dependencies]
 cpp = "0.5.10"
 dlpark = "0.6.0"
 globset = "0.4.16"
-hf-hub = "0.4.3"
+hf-hub = { version = "0.4.3", optional = true }
 serde_json = "1"
 tempfile = "3.20.0"
 thiserror = "2"
@@ -20,4 +25,16 @@ tracing-subscriber = "0.3.19"
 bindgen = "0.72.0"
 cmake = "0.1.54"
 cpp_build = "0.5.10"
+
+[dev-dependencies]
+ctor = "0.2"
+
+[[test]]
+name = "test_tokenizer_info"
+required-features = ["hf_hub"]
+
+[[test]]
+name = "test_huggingface_hub"
+required-features = ["hf_hub"]
+
 

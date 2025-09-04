@@ -8,6 +8,7 @@ pub enum XGrammarErr {
     TokenizerParseFailed(String),
     #[error("invalid tokenizer config: {0}")]
     InvalidTokenizerConfig(String),
+    #[cfg(feature = "hf_hub")]
     #[error("failed to download from Hugging Face Hub: {0}")]
     HuggingFaceDownloadFailed(#[from] crate::huggingface_hub::ApiError),
     #[error("failed to parse JSON: {0}")]

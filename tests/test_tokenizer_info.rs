@@ -1,7 +1,6 @@
-use std::sync::Once;
+mod common;
 
 use tokenizers::Tokenizer;
-use tracing::Level;
 use xgrammar::{FromPretrainedParameters, TokenizerInfo, VocabType};
 
 // Shared test cases (tokenizer_id, expected_vocab_type, expected_add_prefix_space)
@@ -40,14 +39,6 @@ const TEST_TOKENIZER_CASES: &[(&str, VocabType, bool)] = &[
     ("LGAI-EXAONE/EXAONE-4.0-32B-FP8", VocabType::ByteLevel, false),
 ];
 
-static INIT: Once = Once::new();
-
-fn init_subscriber() {
-    INIT.call_once(|| {
-        tracing_subscriber::fmt().with_max_level(Level::INFO).init();
-    });
-}
-
 fn assert_metadata(
     tokenizer_info: &TokenizerInfo,
     expected_vocab_type: VocabType,
@@ -60,8 +51,6 @@ fn assert_metadata(
 /// Test to verify vocab type and add_prefix_space from tokenizer metadata
 #[test]
 fn test_tokenizer_info() {
-    init_subscriber();
-
     let param = std::env::var("HF_TOKEN")
         .map(|token| FromPretrainedParameters { token: Some(token), ..Default::default() })
         .unwrap_or_default();

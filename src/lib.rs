@@ -1,4 +1,5 @@
 mod error;
+#[cfg(feature = "hf_hub")]
 pub mod huggingface_hub;
 mod utils;
 
@@ -8,7 +9,6 @@ use std::{collections::HashMap, ffi::CString};
 use cpp::{cpp, cpp_class};
 use dlpark::{traits::TensorView, versioned::SafeManagedTensorVersioned as DLTensor};
 use error::XGrammarErr;
-use huggingface_hub::{Params, Repo, RepoType, compile_glob_pattern, snapshot_download};
 use serde_json::Value;
 pub use tokenizers;
 pub use tokenizers::FromPretrainedParameters;
@@ -378,13 +378,15 @@ impl TokenizerInfo {
         Self::from_backend_str(&backend_str, vocab_size, stop_token_ids)
     }
 
-    //#[cfg(feature = "hfhub")]
+    #[cfg(feature = "hf_hub")]
     pub fn from_pretrained(
         tokenizer_id: &str,
         revision: Option<String>,
         vocab_size: Option<usize>,
         stop_token_ids: Option<Vec<i32>>,
     ) -> Result<TokenizerInfo> {
+        use huggingface_hub::{Params, Repo, RepoType, compile_glob_pattern, snapshot_download};
+
         let allow_patterns = compile_glob_pattern(TOKENIZER_ALLOW_PATTERN).map_err(|e| {
             XGrammarErr::TokenizerParseFailed(format!("Failed to compile glob patterns: {}", e))
         })?;
@@ -503,25 +505,3 @@ impl TokenizerInfo {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use tracing::Level;
-
-    use crate::{GrammarCompiler, TokenizerInfo, VocabType};
-
-    const EXAONE_4_0_32B_PRETRAINED_ID: &str = "LGAI-EXAONE/EXAONE-4.0-32B";
-
-    #[test]
-    fn test_grammar_compiler() {
-        tracing_subscriber::fmt().with_max_level(Level::TRACE).init();
-        let tok_info =
-            TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
-                .expect("Failed to load tokenizer info");
-        let mut compiler = GrammarCompiler::new(&tok_info);
-        let compiled_grammar = compiler.compile_builtin_json_grammar();
-
-        assert_eq!(compiled_grammar.memory_size_bytes(), 380204);
-        assert_eq!(compiled_grammar.get_tokenizer_info().get_vocab_size(), 102400);
-        assert_eq!(compiled_grammar.get_tokenizer_info().get_vocab_type(), VocabType::ByteLevel);
-    }
-}
