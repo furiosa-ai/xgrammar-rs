@@ -2,13 +2,13 @@ use std::collections::HashSet;
 
 use hf_hub::RepoType;
 use xgrammar::huggingface_hub::{
-    DownloadOptions, HuggingfaceError, Repo, compile_glob_pattern, snapshot_download,
+    HuggingfaceError, Params, Repo, compile_glob_pattern, snapshot_download,
 };
 
 #[allow(clippy::unnecessary_to_owned)]
 fn assert_snapshot_download(
     repo: Repo,
-    options: Option<DownloadOptions>,
+    options: Option<Params>,
     expected_files: &[&str],
 ) -> Result<(), HuggingfaceError> {
     let tmpdir = tempfile::tempdir().unwrap();
@@ -80,7 +80,7 @@ fn test_snapshot_download_with_allow_patterns() -> Result<(), HuggingfaceError> 
         "tokenizer_config.json",
     ];
 
-    let filters = DownloadOptions {
+    let filters = Params {
         allow_patterns: Some(compile_glob_pattern(&expected).unwrap()),
         ..Default::default()
     };
@@ -91,7 +91,7 @@ fn test_snapshot_download_with_allow_patterns() -> Result<(), HuggingfaceError> 
 #[test]
 fn test_snapshot_download_with_ignore_patterns() -> Result<(), HuggingfaceError> {
     let repo = Repo::new("google-t5/t5-small".to_string(), RepoType::Model);
-    let filters = DownloadOptions {
+    let filters = Params {
         ignore_patterns: Some(
             compile_glob_pattern(&["*.ot", "onnx/*", "*.msgpack", "*.h5", "spiece.model", "*.bin"])
                 .unwrap(),

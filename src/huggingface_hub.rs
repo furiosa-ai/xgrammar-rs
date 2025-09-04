@@ -13,8 +13,6 @@ pub use hf_hub::{
 pub enum HuggingfaceError {
     #[error("fail to download: {0}")]
     ApiError(#[from] hf_hub::api::sync::ApiError),
-    #[error("invalid glob pattern: {0}")]
-    InvalidPatternError(#[from] globset::Error),
 }
 
 pub fn compile_glob_pattern(patterns: &[&str]) -> Result<Vec<GlobMatcher>, globset::Error> {
@@ -27,13 +25,12 @@ pub fn compile_glob_pattern(patterns: &[&str]) -> Result<Vec<GlobMatcher>, globs
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct DownloadOptions {
-    // TODO - add expected model_kind to prevent downloading a large model unnecessarily
+pub struct Params {
     pub allow_patterns: Option<Vec<GlobMatcher>>,
     pub ignore_patterns: Option<Vec<GlobMatcher>>,
 }
 
-impl DownloadOptions {
+impl Params {
     pub fn is_matched(&self, filename: &str) -> bool {
         // Referred from https://github.com/huggingface/huggingface_hub/blob/a09927331ec0ed2df90968da2200c6bef8ab4117/src/huggingface_hub/utils/_paths.py#L124
         if let Some(patterns) = &self.allow_patterns {
@@ -52,11 +49,12 @@ impl DownloadOptions {
     }
 }
 
-pub fn snapshot_download(
-    repo: Repo,
-    options: Option<DownloadOptions>,
-) -> Result<PathBuf, ApiError> {
-    let api: Api = ApiBuilder::from_env().build()?;
+pub fn snapshot_download(repo: Repo, options: Option<Params>) -> Result<PathBuf, ApiError> {
+    let api: Api = if let Ok(token) = std::env::var("HF_TOKEN") {
+        ApiBuilder::new().with_token(Some(token)).build()?
+    } else {
+        ApiBuilder::from_env().build()?
+    };
     let api_repo: ApiRepo = api.repo(repo.clone());
     let repo_info: RepoInfo = api_repo.info()?;
 

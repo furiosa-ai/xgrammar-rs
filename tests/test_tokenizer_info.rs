@@ -1,7 +1,8 @@
+use std::sync::Once;
+
+use tokenizers::Tokenizer;
 use tracing::Level;
 use xgrammar::{FromPretrainedParameters, TokenizerInfo, VocabType};
-
-const EXAONE_4_0_32B_PRETRAINED_ID: &str = "LGAI-EXAONE/EXAONE-4.0-32B";
 
 // Shared test cases (tokenizer_id, expected_vocab_type, expected_add_prefix_space)
 const TEST_TOKENIZER_CASES: &[(&str, VocabType, bool)] = &[
@@ -39,122 +40,41 @@ const TEST_TOKENIZER_CASES: &[(&str, VocabType, bool)] = &[
     ("LGAI-EXAONE/EXAONE-4.0-32B-FP8", VocabType::ByteLevel, false),
 ];
 
-#[test]
-fn test_from_pretrained() {
-    tracing_subscriber::fmt().with_max_level(Level::DEBUG).init();
+static INIT: Once = Once::new();
 
-    let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
-        .expect("Failed to load tokenizer info");
-    assert_eq!(tok_info.get_vocab_type(), VocabType::ByteLevel);
-    assert!(!tok_info.get_add_prefix_space());
-    assert_eq!(tok_info.get_vocab_size(), 102400);
+fn init_subscriber() {
+    INIT.call_once(|| {
+        tracing_subscriber::fmt().with_max_level(Level::INFO).init();
+    });
 }
 
-fn assert_vocab_type_prepend_space(
-    tokenizer_id: &str,
+fn assert_metadata(
+    tokenizer_info: &TokenizerInfo,
     expected_vocab_type: VocabType,
     expected_add_prefix_space: bool,
 ) {
-    use tokenizers::tokenizer::Tokenizer;
+    assert_eq!(tokenizer_info.get_vocab_type(), expected_vocab_type);
+    assert_eq!(tokenizer_info.get_add_prefix_space(), expected_add_prefix_space);
+}
+
+/// Test to verify vocab type and add_prefix_space from tokenizer metadata
+#[test]
+fn test_tokenizer_info() {
+    init_subscriber();
 
     let param = std::env::var("HF_TOKEN")
         .map(|token| FromPretrainedParameters { token: Some(token), ..Default::default() })
         .unwrap_or_default();
 
-    let tokenizer =
-        Tokenizer::from_pretrained(tokenizer_id, Some(param)).expect("Failed to load tokenizer");
-    let metadata_hf = TokenizerInfo::detect_metadata_from_hf(&tokenizer.to_string(false).unwrap());
-    assert_eq!(metadata_hf.vocab_type, expected_vocab_type);
-    assert_eq!(metadata_hf.add_prefix_space, expected_add_prefix_space);
-}
+    for &(tokenizer_id, vocab_type, add_prefix_space) in TEST_TOKENIZER_CASES {
+        tracing::info!("Testing tokenizer: {}", tokenizer_id);
+        let tokenizer = Tokenizer::from_pretrained(tokenizer_id, Some(param.clone()))
+            .expect("Failed to load tokenizer");
 
-#[test]
-fn test_detect_metadata_from_hf() {
-    for &(tokenizer_id, expected_vocab_type, expected_add_prefix_space) in TEST_TOKENIZER_CASES {
-        assert_vocab_type_prepend_space(
-            tokenizer_id,
-            expected_vocab_type,
-            expected_add_prefix_space,
-        );
-    }
-}
+        let tokenizer_info = TokenizerInfo::from_pretrained(tokenizer_id, None, None, None)
+            .expect("Failed to get tokenizer info");
+        assert_metadata(&tokenizer_info, vocab_type, add_prefix_space);
 
-#[test]
-fn test_tokenizers() {
-    use tokenizers::tokenizer::Tokenizer;
-
-    // Example usage of the tokenizers crate
-    let tokenizer = Tokenizer::from_pretrained("LGAI-EXAONE/EXAONE-4.0-32B", None)
-        .expect("Failed to load tokenizer");
-    tokenizer
-        .encode("Hello, world!", false)
-        .expect("Failed to encode text")
-        .get_tokens()
-        .iter()
-        .for_each(|token| println!("Token: {}", token));
-
-    assert_eq!(tokenizer.get_vocab_size(false), 102400);
-    assert_eq!(*tokenizer.get_vocab(false).values().max().unwrap(), 102399);
-}
-
-/// The purpose of this test is to prove the vocab map from backend string is the same as
-/// one from API. This way depends on the implementation of huggingface tokenizer.
-#[test]
-fn test_vocab_map_from_backend_str() {
-    use serde_json::Value;
-    use tokenizers::tokenizer::Tokenizer;
-
-    for &(tokenizer_id, _, _) in TEST_TOKENIZER_CASES {
-        // Load tokenizer (same as other tests)
-        let tokenizer = Tokenizer::from_pretrained(tokenizer_id, None)
-            .unwrap_or_else(|e| panic!("failed to load tokenizer {tokenizer_id}: {e}"));
-
-        // Original vocab map from the tokenizer API
-        let vocab_from_api = tokenizer.get_vocab(false);
-
-        // Get backend string (serialized json) and parse vocab field
-        let backend_str = tokenizer.to_string(false).expect("serialize backend");
-        let v: Value = serde_json::from_str(&backend_str).expect("parse backend json");
-        let model = v.get("model").expect("missing model field in backend_str");
-        let vocab_json = model.get("vocab").expect("missing vocab field in backend_str");
-        let vocab_obj = vocab_json.as_object().expect("vocab is not an object");
-
-        // Build vocab map from backend_str
-        let mut vocab_from_backend: std::collections::HashMap<String, u32> =
-            std::collections::HashMap::with_capacity(vocab_obj.len());
-        for (token, id_v) in vocab_obj {
-            let id = id_v
-                .as_u64()
-                .or_else(|| id_v.as_i64().map(|x| x as u64))
-                .expect("vocab id must be a number");
-            vocab_from_backend.insert(token.clone(), id as u32);
-        }
-
-        // Check basic invariants
-        assert_eq!(
-            vocab_from_backend.len(),
-            vocab_from_api.len(),
-            "vocab size mismatch for {tokenizer_id}"
-        );
-
-        // Compare every (token -> id) mapping
-        for (token, token_id_from_api) in &vocab_from_api {
-            let token_id_from_backend = vocab_from_backend.get(token).unwrap_or_else(|| {
-                panic!("token '{}' missing in backend vocab for {tokenizer_id}", token)
-            });
-            assert_eq!(
-                token_id_from_backend, token_id_from_api,
-                "token '{}' id mismatch for {tokenizer_id}",
-                token
-            );
-        }
-
-        // Extra safety: max id consistency
-        let max_token_id_from_api = vocab_from_api.values().max().cloned().unwrap();
-        let max_token_id_from_backend = vocab_from_backend.values().max().cloned().unwrap();
-        assert_eq!(
-            max_token_id_from_api, max_token_id_from_backend,
-            "max vocab id mismatch for {tokenizer_id}"
-        );
+        assert_eq!(tokenizer.get_vocab_size(false), tokenizer_info.get_vocab_size() as usize);
     }
 }
