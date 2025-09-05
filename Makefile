@@ -1,5 +1,5 @@
 install-cargo-deps:
-	cargo install cargo-sort@2.0.1 cargo-sort
+	cargo install cargo-machete@0.7.0 cargo-sort
 
 lint:
 	cargo machete
