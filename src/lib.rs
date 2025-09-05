@@ -499,6 +499,34 @@ impl GrammarCompiler {
         })
     }
 
+    /// Utility function to extract a specific field from StructuralTagItems and convert to CStrings
+    fn extract_field_to_cstring_ptrs<F>(
+        tags: &[StructuralTagItem],
+        field_extractor: F,
+    ) -> (Vec<CString>, Vec<*const i8>)
+    where
+        F: Fn(&StructuralTagItem) -> &str,
+    {
+        let cstrings: Vec<CString> = tags
+            .iter()
+            .map(|tag| {
+                CString::new(field_extractor(tag)).expect("Failed to convert field to CString")
+            })
+            .collect();
+        let ptrs: Vec<*const i8> = cstrings.iter().map(|cs| cs.as_ptr()).collect();
+        (cstrings, ptrs)
+    }
+
+    /// Utility function to convert a slice of strings to CStrings and their pointers
+    fn strings_to_cstring_ptrs(strings: &[String]) -> (Vec<CString>, Vec<*const i8>) {
+        let cstrings: Vec<CString> = strings
+            .iter()
+            .map(|s| CString::new(s.as_str()).expect("Failed to convert string to CString"))
+            .collect();
+        let ptrs: Vec<*const i8> = cstrings.iter().map(|cs| cs.as_ptr()).collect();
+        (cstrings, ptrs)
+    }
+
     /// Get the compiled grammar for structural tags.
     ///
     /// # Arguments
@@ -512,36 +540,14 @@ impl GrammarCompiler {
         tags: &[StructuralTagItem],
         triggers: &[String],
     ) -> CompiledGrammar {
-        // Convert Rust StructuralTagItem vector to C++ format
-        let tag_begins: Vec<CString> = tags
-            .iter()
-            .map(|tag| {
-                CString::new(tag.begin.as_str()).expect("Failed to convert begin to CString")
-            })
-            .collect();
-        let tag_schemas: Vec<CString> = tags
-            .iter()
-            .map(|tag| {
-                CString::new(tag.schema.as_str()).expect("Failed to convert schema to CString")
-            })
-            .collect();
-        let tag_ends: Vec<CString> = tags
-            .iter()
-            .map(|tag| CString::new(tag.end.as_str()).expect("Failed to convert end to CString"))
-            .collect();
-
-        let trigger_cstrings: Vec<CString> = triggers
-            .iter()
-            .map(|trigger| {
-                CString::new(trigger.as_str()).expect("Failed to convert trigger to CString")
-            })
-            .collect();
-
-        // Create pointers for C++ interface
-        let tag_begin_ptrs: Vec<*const i8> = tag_begins.iter().map(|cs| cs.as_ptr()).collect();
-        let tag_schema_ptrs: Vec<*const i8> = tag_schemas.iter().map(|cs| cs.as_ptr()).collect();
-        let tag_end_ptrs: Vec<*const i8> = tag_ends.iter().map(|cs| cs.as_ptr()).collect();
-        let trigger_ptrs: Vec<*const i8> = trigger_cstrings.iter().map(|cs| cs.as_ptr()).collect();
+        // Convert Rust data to C++ format using utility functions
+        let (_begin_cstrings, tag_begin_ptrs) =
+            Self::extract_field_to_cstring_ptrs(tags, |tag| &tag.begin);
+        let (_schema_cstrings, tag_schema_ptrs) =
+            Self::extract_field_to_cstring_ptrs(tags, |tag| &tag.schema);
+        let (_end_cstrings, tag_end_ptrs) =
+            Self::extract_field_to_cstring_ptrs(tags, |tag| &tag.end);
+        let (_trigger_cstrings, trigger_ptrs) = Self::strings_to_cstring_ptrs(triggers);
 
         let num_tags = tags.len();
         let num_triggers = triggers.len();
