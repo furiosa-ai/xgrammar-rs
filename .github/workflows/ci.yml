@@ -26,4 +26,6 @@ jobs:
         run: make lint
 
       - name: Run tests
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: make test
