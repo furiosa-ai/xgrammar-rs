@@ -21,6 +21,25 @@ pub type VocabMap = std::collections::HashMap<String, u32>;
 
 pub type TokenId = i32;
 
+/// Represents a structural tag item with begin, schema, and end components.
+/// This is used for structured text generation with specific formatting tags.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructuralTagItem {
+    /// The beginning tag/marker
+    pub begin: String,
+    /// The JSON schema for the content
+    pub schema: String,
+    /// The ending tag/marker
+    pub end: String,
+}
+
+impl StructuralTagItem {
+    /// Create a new StructuralTagItem
+    pub fn new(begin: String, schema: String, end: String) -> Self {
+        Self { begin, schema, end }
+    }
+}
+
 cpp! {{
     #include "xgrammar/xgrammar.h"
     #include <picojson.h>
@@ -97,10 +116,25 @@ impl CompiledGrammar {
 }
 
 impl GrammarCompiler {
+    /// Create a new GrammarCompiler with default parameters.
+    /// # Arguments
+    /// * `tokenizer_info` - The tokenizer info to use for the grammar compiler
+    ///
+    /// # Returns
+    /// * A new GrammarCompiler instance
     pub fn new(tokenizer_info: &TokenizerInfo) -> Self {
         Self::with(tokenizer_info, None, None, None)
     }
 
+    /// Create a new GrammarCompiler with custom parameters.
+    /// # Arguments
+    /// * `tokenizer_info` - The tokenizer info to use for the grammar compiler
+    /// * `max_threads` - The maximum number of threads to use (default: 1)
+    /// * `cache_enabled` - Whether to enable caching of compiled grammars (default: true)
+    /// * `max_memory_bytes` - The maximum memory in bytes to use for caching (-1 means unlimited, default: -1)
+    ///
+    /// # Returns
+    /// * A new GrammarCompiler instance
     pub fn with(
         tokenizer_info: &TokenizerInfo,
         max_threads: Option<usize>,
@@ -161,11 +195,13 @@ impl GrammarCompiler {
         let has_indent = indent.is_some();
         let indent_value = indent.unwrap_or(0);
         let has_separators = separators.is_some();
-        
-        let (_obj_sep_cstring, _array_sep_cstring, obj_sep_ptr, array_sep_ptr) = 
+
+        let (_obj_sep_cstring, _array_sep_cstring, obj_sep_ptr, array_sep_ptr) =
             if let Some((obj_sep, array_sep)) = separators {
-                let obj_sep_cstring = CString::new(obj_sep).expect("Failed to convert object separator to CString");
-                let array_sep_cstring = CString::new(array_sep).expect("Failed to convert array separator to CString");
+                let obj_sep_cstring =
+                    CString::new(obj_sep).expect("Failed to convert object separator to CString");
+                let array_sep_cstring =
+                    CString::new(array_sep).expect("Failed to convert array separator to CString");
                 let obj_sep_ptr = obj_sep_cstring.as_ptr();
                 let array_sep_ptr = array_sep_cstring.as_ptr();
                 (Some(obj_sep_cstring), Some(array_sep_cstring), obj_sep_ptr, array_sep_ptr)
@@ -187,13 +223,13 @@ impl GrammarCompiler {
             std::string schema_str(schema_ptr);
             std::optional<int> opt_indent = has_indent ? std::make_optional(indent_value) : std::nullopt;
             std::optional<std::pair<std::string, std::string>> opt_separators;
-            
+
             if (has_separators) {
                 opt_separators = std::make_pair(std::string(obj_sep_ptr), std::string(array_sep_ptr));
             } else {
                 opt_separators = std::nullopt;
             }
-            
+
             return self->CompileJSONSchema(schema_str, any_whitespace, opt_indent, opt_separators, strict_mode);
         })
     }
@@ -243,6 +279,88 @@ impl GrammarCompiler {
     pub fn cache_limit_bytes(&self) -> i64 {
         cpp!(unsafe [self as "const xgrammar::GrammarCompiler*"] -> i64 as "long long" {
             return self->CacheLimitBytes();
+        })
+    }
+
+    /// Get the compiled grammar for structural tags.
+    ///
+    /// # Arguments
+    /// * `tags` - Vector of structural tag items, each containing begin, schema, and end components
+    /// * `triggers` - Vector of trigger strings
+    ///
+    /// # Returns
+    /// * A compiled grammar that can be used with GrammarMatcher
+    pub fn compile_structural_tag(
+        &mut self,
+        tags: &[StructuralTagItem],
+        triggers: &[String],
+    ) -> CompiledGrammar {
+        // Convert Rust StructuralTagItem vector to C++ format
+        let tag_begins: Vec<CString> = tags
+            .iter()
+            .map(|tag| {
+                CString::new(tag.begin.as_str()).expect("Failed to convert begin to CString")
+            })
+            .collect();
+        let tag_schemas: Vec<CString> = tags
+            .iter()
+            .map(|tag| {
+                CString::new(tag.schema.as_str()).expect("Failed to convert schema to CString")
+            })
+            .collect();
+        let tag_ends: Vec<CString> = tags
+            .iter()
+            .map(|tag| CString::new(tag.end.as_str()).expect("Failed to convert end to CString"))
+            .collect();
+
+        let trigger_cstrings: Vec<CString> = triggers
+            .iter()
+            .map(|trigger| {
+                CString::new(trigger.as_str()).expect("Failed to convert trigger to CString")
+            })
+            .collect();
+
+        // Create pointers for C++ interface
+        let tag_begin_ptrs: Vec<*const i8> = tag_begins.iter().map(|cs| cs.as_ptr()).collect();
+        let tag_schema_ptrs: Vec<*const i8> = tag_schemas.iter().map(|cs| cs.as_ptr()).collect();
+        let tag_end_ptrs: Vec<*const i8> = tag_ends.iter().map(|cs| cs.as_ptr()).collect();
+        let trigger_ptrs: Vec<*const i8> = trigger_cstrings.iter().map(|cs| cs.as_ptr()).collect();
+
+        let num_tags = tags.len();
+        let num_triggers = triggers.len();
+
+        let tag_begin_ptrs_ptr = tag_begin_ptrs.as_ptr();
+        let tag_schema_ptrs_ptr = tag_schema_ptrs.as_ptr();
+        let tag_end_ptrs_ptr = tag_end_ptrs.as_ptr();
+        let trigger_ptrs_ptr = trigger_ptrs.as_ptr();
+
+        cpp!(unsafe [
+            self as "xgrammar::GrammarCompiler*",
+            tag_begin_ptrs_ptr as "const char* const*",
+            tag_schema_ptrs_ptr as "const char* const*",
+            tag_end_ptrs_ptr as "const char* const*",
+            num_tags as "size_t",
+            trigger_ptrs_ptr as "const char* const*",
+            num_triggers as "size_t"
+        ] -> CompiledGrammar as "xgrammar::CompiledGrammar" {
+            std::vector<xgrammar::StructuralTagItem> tags_vector;
+            tags_vector.reserve(num_tags);
+
+            for (size_t i = 0; i < num_tags; ++i) {
+                tags_vector.emplace_back(xgrammar::StructuralTagItem{
+                    std::string(tag_begin_ptrs_ptr[i]),
+                    std::string(tag_schema_ptrs_ptr[i]),
+                    std::string(tag_end_ptrs_ptr[i])
+                });
+            }
+
+            std::vector<std::string> triggers_vector;
+            triggers_vector.reserve(num_triggers);
+            for (size_t i = 0; i < num_triggers; ++i) {
+                triggers_vector.emplace_back(std::string(trigger_ptrs_ptr[i]));
+            }
+
+            return self->CompileStructuralTag(tags_vector, triggers_vector);
         })
     }
 }
@@ -402,14 +520,6 @@ impl GrammarMatcher {
 }
 
 impl TokenizerInfo {
-    fn get_config(path: &Path) -> self::Result<Value> {
-        let config_path = path.join("config.json");
-        let content =
-            std::fs::read_to_string(&config_path).map_err(XGrammarErr::TokenizerLoadFailed)?;
-        let config: Value = serde_json::from_str(&content)?;
-        Ok(config)
-    }
-
     pub fn from_backend_str(
         backend_str: &str,
         vocab_size: Option<usize>,
@@ -438,6 +548,16 @@ impl TokenizerInfo {
         Self::new(vocab_map, vocab_type, final_vocab_size, stop_token_ids, add_prefix_space)
     }
 
+    #[cfg(feature = "hf_hub")]
+    fn get_config(path: &Path) -> self::Result<Value> {
+        let config_path = path.join("config.json");
+        let content =
+            std::fs::read_to_string(&config_path).map_err(XGrammarErr::TokenizerLoadFailed)?;
+        let config: Value = serde_json::from_str(&content)?;
+        Ok(config)
+    }
+
+    #[cfg(feature = "hf_hub")]
     fn from_path<P>(
         path: P,
         vocab_size: Option<usize>,

@@ -25,7 +25,7 @@ fn test_invalid_json_syntax() {
 
     match result {
         Ok(_) => println!("Malformed JSON was accepted (unexpected)"),
-        Err(_) => println!("Malformed JSON caused a panic (as expected)")
+        Err(_) => println!("Malformed JSON caused a panic (as expected)"),
     }
 }
 
@@ -43,7 +43,7 @@ fn test_empty_schema() {
 
     match result {
         Ok(_) => println!("Empty string was accepted (unexpected)"),
-        Err(_) => println!("Empty string caused a panic (as expected)")
+        Err(_) => println!("Empty string caused a panic (as expected)"),
     }
 }
 
@@ -69,7 +69,7 @@ fn test_invalid_schema_structure() {
 
     match result {
         Ok(_) => println!("Invalid schema type was accepted (might be valid behavior)"),
-        Err(_) => println!("Invalid schema type caused a panic")
+        Err(_) => println!("Invalid schema type caused a panic"),
     }
 }
 
@@ -87,6 +87,6 @@ fn test_non_json_string() {
 
     match result {
         Ok(_) => println!("Non-JSON string was accepted (unexpected)"),
-        Err(_) => println!("Non-JSON string caused a panic (as expected)")
+        Err(_) => println!("Non-JSON string caused a panic (as expected)"),
     }
 }

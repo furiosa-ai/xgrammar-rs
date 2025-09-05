@@ -1,11 +1,11 @@
 mod common;
 
-use xgrammar::{GrammarCompiler, TokenizerInfo, VocabType};
+use xgrammar::{GrammarCompiler, StructuralTagItem, TokenizerInfo, VocabType};
 
 const EXAONE_4_0_32B_PRETRAINED_ID: &str = "LGAI-EXAONE/EXAONE-4.0-32B";
 
 #[test]
-fn test_grammar_compiler() {
+fn test_compile_builtin_json_grammar() {
     let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
         .expect("Failed to load tokenizer info");
     let mut compiler = GrammarCompiler::new(&tok_info);
@@ -14,73 +14,6 @@ fn test_grammar_compiler() {
     assert!(compiled_grammar.memory_size_bytes() > 0);
     assert_eq!(compiled_grammar.get_tokenizer_info().get_vocab_size(), 102400);
     assert_eq!(compiled_grammar.get_tokenizer_info().get_vocab_type(), VocabType::ByteLevel);
-}
-
-#[test]
-fn test_compile_json_schema() {
-    let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
-        .expect("Failed to load tokenizer info");
-    let mut compiler = GrammarCompiler::new(&tok_info);
-
-    // Test with a simple JSON schema
-    let schema = r#"{
-        "type": "object",
-        "properties": {
-            "name": {"type": "string"},
-            "age": {"type": "integer", "minimum": 0}
-        },
-        "required": ["name", "age"]
-    }"#;
-
-    // Test with default parameters
-    let compiled_grammar = compiler.compile_json_schema(schema, None, None, None, None);
-    assert!(compiled_grammar.memory_size_bytes() > 0);
-    assert_eq!(compiled_grammar.get_tokenizer_info().get_vocab_size(), 102400);
-    assert_eq!(compiled_grammar.get_tokenizer_info().get_vocab_type(), VocabType::ByteLevel);
-
-    // Test with custom parameters
-    let compiled_grammar_custom = compiler.compile_json_schema(
-        schema,
-        Some(false),
-        Some(2),
-        Some((":".to_string(), ",".to_string())),
-        Some(true),
-    );
-    assert!(compiled_grammar_custom.memory_size_bytes() > 0);
-
-    // Test with a different schema (array type)
-    let array_schema = r#"{
-        "type": "array",
-        "items": {"type": "string"},
-        "minItems": 1,
-        "maxItems": 3
-    }"#;
-
-    let array_compiled = compiler.compile_json_schema(array_schema, None, None, None, None);
-    assert!(array_compiled.memory_size_bytes() > 0);
-}
-
-#[test]
-fn test_compile_regex() {
-    let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
-        .expect("Failed to load tokenizer info");
-    let mut compiler = GrammarCompiler::new(&tok_info);
-
-    // Test simple regex patterns
-    let regex_patterns = vec![
-        r"\d+",           // digits
-        r"[a-zA-Z]+",     // letters
-        r"\w+@\w+\.\w+",  // simple email pattern
-        r"^hello world$", // exact match
-        r"(foo|bar)+",    // alternation with repetition
-    ];
-
-    for pattern in regex_patterns {
-        let compiled_regex = compiler.compile_regex(pattern);
-        assert!(compiled_regex.memory_size_bytes() > 0);
-        assert_eq!(compiled_regex.get_tokenizer_info().get_vocab_size(), 102400);
-        assert_eq!(compiled_regex.get_tokenizer_info().get_vocab_type(), VocabType::ByteLevel);
-    }
 }
 
 #[test]
@@ -155,4 +88,150 @@ fn test_cache_properties() {
 
     // Should respect the custom limit
     assert!(custom_cache_limit > 0);
+}
+
+#[test]
+fn test_compile_json_schema() {
+    let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
+        .expect("Failed to load tokenizer info");
+    let mut compiler = GrammarCompiler::new(&tok_info);
+
+    // Test with a simple JSON schema
+    let schema = r#"{
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "age": {"type": "integer", "minimum": 0}
+        },
+        "required": ["name", "age"]
+    }"#;
+
+    // Test with default parameters
+    let compiled_grammar = compiler.compile_json_schema(schema, None, None, None, None);
+    assert!(compiled_grammar.memory_size_bytes() > 0);
+    assert_eq!(compiled_grammar.get_tokenizer_info().get_vocab_size(), 102400);
+    assert_eq!(compiled_grammar.get_tokenizer_info().get_vocab_type(), VocabType::ByteLevel);
+
+    // Test with custom parameters
+    let compiled_grammar_custom = compiler.compile_json_schema(
+        schema,
+        Some(false),
+        Some(2),
+        Some((":".to_string(), ",".to_string())),
+        Some(true),
+    );
+    assert!(compiled_grammar_custom.memory_size_bytes() > 0);
+
+    // Test with a different schema (array type)
+    let array_schema = r#"{
+        "type": "array",
+        "items": {"type": "string"},
+        "minItems": 1,
+        "maxItems": 3
+    }"#;
+
+    let array_compiled = compiler.compile_json_schema(array_schema, None, None, None, None);
+    assert!(array_compiled.memory_size_bytes() > 0);
+}
+
+#[test]
+fn test_compile_regex() {
+    let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
+        .expect("Failed to load tokenizer info");
+    let mut compiler = GrammarCompiler::new(&tok_info);
+
+    // Test simple regex patterns
+    let regex_patterns = vec![
+        r"\d+",           // digits
+        r"[a-zA-Z]+",     // letters
+        r"\w+@\w+\.\w+",  // simple email pattern
+        r"^hello world$", // exact match
+        r"(foo|bar)+",    // alternation with repetition
+    ];
+
+    for pattern in regex_patterns {
+        let compiled_regex = compiler.compile_regex(pattern);
+        assert!(compiled_regex.memory_size_bytes() > 0);
+        assert_eq!(compiled_regex.get_tokenizer_info().get_vocab_size(), 102400);
+        assert_eq!(compiled_regex.get_tokenizer_info().get_vocab_type(), VocabType::ByteLevel);
+    }
+}
+
+#[test]
+fn test_compile_structural_tag() {
+    let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
+        .expect("Failed to load tokenizer info");
+    let mut compiler = GrammarCompiler::new(&tok_info);
+
+    // Test with simple structural tags
+    let tags = vec![
+        StructuralTagItem::new(
+            "<thinking>".to_string(),
+            r#"{"type": "string"}"#.to_string(),
+            "</thinking>".to_string(),
+        ),
+        StructuralTagItem::new(
+            "<answer>".to_string(),
+            r#"{"type": "object", "properties": {"result": {"type": "string"}}}"#.to_string(),
+            "</answer>".to_string(),
+        ),
+    ];
+
+    let triggers = vec!["<thinking>".to_string(), "<answer>".to_string()];
+
+    let compiled_grammar = compiler.compile_structural_tag(&tags, &triggers);
+    assert!(compiled_grammar.memory_size_bytes() > 0);
+}
+
+#[test]
+fn test_compile_structural_tag_complex() {
+    let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
+        .expect("Failed to load tokenizer info");
+    let mut compiler = GrammarCompiler::new(&tok_info);
+
+    // Test with more complex structural tags
+    let tags = vec![
+        StructuralTagItem::new(
+            "```json".to_string(),
+            r#"{
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "minLength": 1},
+                    "age": {"type": "integer", "minimum": 0},
+                    "hobbies": {
+                        "type": "array",
+                        "items": {"type": "string"}
+                    }
+                },
+                "required": ["name", "age"]
+            }"#
+            .to_string(),
+            "```".to_string(),
+        ),
+        StructuralTagItem::new(
+            "```xml".to_string(),
+            r#"{"type": "string", "pattern": "^<[^>]+>.*</[^>]+>$"}"#.to_string(),
+            "```".to_string(),
+        ),
+    ];
+
+    let triggers = vec!["```json".to_string(), "```xml".to_string()];
+
+    let compiled_grammar = compiler.compile_structural_tag(&tags, &triggers);
+    assert!(compiled_grammar.memory_size_bytes() > 0);
+}
+
+#[test]
+fn test_compile_structural_tag_empty() {
+    let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
+        .expect("Failed to load tokenizer info");
+    let mut compiler = GrammarCompiler::new(&tok_info);
+
+    // Test with empty tags and triggers
+    let tags: Vec<StructuralTagItem> = vec![];
+    let triggers: Vec<String> = vec![];
+
+    let compiled_grammar = compiler.compile_structural_tag(&tags, &triggers);
+    // Should not crash, and should have some memory usage
+    let _memory_size = compiled_grammar.memory_size_bytes(); // Just verify it doesn't crash
 }
