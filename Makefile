@@ -11,3 +11,8 @@ lint:
 do-lint:
 	cargo sort --grouped --workspace
 	cargo fmt --all
+
+test:
+	cargo nextest run $(TEST_ARGS)
+
+
