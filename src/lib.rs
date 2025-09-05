@@ -93,6 +93,223 @@ pub static TOKENIZER_MODEL_KEY: &str = "model";
 pub static TOKENIZER_VOCAB_KEY: &str = "vocab";
 pub static HF_CONFIG_EOS_TOKEN_ID_KEY: &str = "eos_token_id";
 
+impl TokenizerInfo {
+    pub fn from_backend_str(
+        backend_str: &str,
+        vocab_size: Option<usize>,
+        stop_token_ids: Vec<TokenId>,
+    ) -> self::Result<Self> {
+        let backend_json: serde_json::Value =
+            serde_json::from_str(backend_str).expect("Failed to parse backend string as JSON");
+        let model = get_json_field(&backend_json, TOKENIZER_MODEL_KEY)?;
+        let vocab_map = get_json_field(model, TOKENIZER_VOCAB_KEY)?;
+        let vocab_map: HashMap<String, u32> =
+            serde_json::from_value(vocab_map.clone()).map_err(|e| {
+                XGrammarErr::TokenizerParseFailed(format!("Failed to parse vocab map: {}", e))
+            })?;
+
+        let max_id = vocab_map
+            .values()
+            .max()
+            .ok_or(XGrammarErr::InvalidTokenizerConfig("Vocab map is empty".to_string()))?;
+        let tokenizer_vocab_size = std::cmp::max(vocab_map.len(), (max_id + 1) as usize);
+        let final_vocab_size = vocab_size.unwrap_or(tokenizer_vocab_size);
+
+        let tokenizer_metadata = Self::detect_metadata_from_hf(backend_str);
+        let vocab_type = tokenizer_metadata.vocab_type;
+        let add_prefix_space = tokenizer_metadata.add_prefix_space;
+
+        Self::new(vocab_map, vocab_type, final_vocab_size, stop_token_ids, add_prefix_space)
+    }
+
+    #[cfg(feature = "hf_hub")]
+    fn get_config(path: &Path) -> self::Result<Value> {
+        let config_path = path.join("config.json");
+        let content =
+            std::fs::read_to_string(&config_path).map_err(XGrammarErr::TokenizerLoadFailed)?;
+        let config: Value = serde_json::from_str(&content)?;
+        Ok(config)
+    }
+
+    #[cfg(feature = "hf_hub")]
+    fn from_path<P>(
+        path: P,
+        vocab_size: Option<usize>,
+        stop_token_ids: Option<Vec<TokenId>>,
+    ) -> Result<Self>
+    where
+        P: AsRef<Path>,
+    {
+        let path = path.as_ref();
+        let tokenizer_json_path = path.join(TOKENIZER_FILE);
+        let backend_str = std::fs::read_to_string(&tokenizer_json_path)
+            .map_err(XGrammarErr::TokenizerLoadFailed)?;
+
+        let hf_config = Self::get_config(path)?;
+        let eos_token = get_json_field(&hf_config, HF_CONFIG_EOS_TOKEN_ID_KEY)?;
+
+        let mut stop_token_ids = stop_token_ids.unwrap_or_default();
+
+        match eos_token {
+            Value::Number(eos_token_id) => {
+                if eos_token_id.is_i64() {
+                    let eos_token_id = eos_token_id.as_i64().unwrap() as i32;
+                    stop_token_ids.push(eos_token_id);
+                } else {
+                    return Err(XGrammarErr::TokenizerParseFailed(
+                        "eos_token must be an integer".to_string(),
+                    ));
+                }
+            }
+            Value::Array(eos_token_ids) => {
+                for token in eos_token_ids {
+                    if token.is_i64() {
+                        let token_id = token.as_i64().unwrap() as i32;
+                        stop_token_ids.push(token_id);
+                    } else {
+                        return Err(XGrammarErr::TokenizerParseFailed(
+                            "eos_token array must contain integers".to_string(),
+                        ));
+                    }
+                }
+            }
+            _ => {
+                return Err(XGrammarErr::TokenizerParseFailed(
+                    "eos_token must be a string or an array of strings".to_string(),
+                ));
+            }
+        }
+
+        Self::from_backend_str(&backend_str, vocab_size, stop_token_ids)
+    }
+
+    #[cfg(feature = "hf_hub")]
+    pub fn from_pretrained(
+        tokenizer_id: &str,
+        revision: Option<String>,
+        vocab_size: Option<usize>,
+        stop_token_ids: Option<Vec<i32>>,
+    ) -> Result<TokenizerInfo> {
+        use huggingface_hub::{Params, Repo, RepoType, compile_glob_pattern, snapshot_download};
+
+        let allow_patterns = compile_glob_pattern(TOKENIZER_ALLOW_PATTERN).map_err(|e| {
+            XGrammarErr::TokenizerParseFailed(format!("Failed to compile glob patterns: {}", e))
+        })?;
+        let download_options =
+            Some(Params { allow_patterns: Some(allow_patterns), ..Default::default() });
+
+        let repo = Repo::with_revision(
+            tokenizer_id.to_string(),
+            RepoType::Model,
+            revision.unwrap_or("main".to_string()),
+        );
+        let tokenizer_dir = snapshot_download(repo, download_options)?;
+        Self::from_path(tokenizer_dir, vocab_size, stop_token_ids)
+    }
+
+    fn new(
+        vocab_map: HashMap<String, u32>,
+        vocab_type: VocabType,
+        vocab_size: usize,
+        stop_token_ids: Vec<i32>,
+        add_prefix_space: bool,
+    ) -> self::Result<Self> {
+        // Ensure the vocab size is at least as large as the max id in the vocab map
+        let mut encoded_vocab = vec![CString::new("").unwrap(); vocab_size];
+
+        // Fill the encoded_vocab with tokens from the vocab_map
+        for (token, idx) in vocab_map.iter() {
+            assert!(
+                (*idx as usize) < vocab_size,
+                "Token ID {} exceeds vocab size {}",
+                idx,
+                vocab_size
+            );
+            encoded_vocab[*idx as usize] =
+                CString::new(token.as_str()).expect("fail to convert a token to CString");
+        }
+
+        let encoded_vocab_ptr: Vec<_> = encoded_vocab.iter().map(|s| s.as_ptr()).collect();
+        let encoded_vocab_ptr_ptr = encoded_vocab_ptr.as_ptr();
+        let vocab_size_i32 = vocab_size as i32;
+        let stop_token_ids_ptr = stop_token_ids.as_ptr();
+        let stop_token_ids_len = stop_token_ids.len();
+
+        Ok(cpp!(unsafe [
+            encoded_vocab_ptr_ptr as "const char* const*",
+            vocab_type as "xgrammar::VocabType",
+            vocab_size_i32 as "int",
+            stop_token_ids_ptr as "const int32_t*",
+            stop_token_ids_len as "size_t",
+            add_prefix_space as "bool"
+        ] -> TokenizerInfo as "xgrammar::TokenizerInfo" {
+            std::vector<std::string> encoded_vocab;
+            for (int i = 0; i < vocab_size_i32; ++i) {
+                encoded_vocab.push_back(std::string(encoded_vocab_ptr_ptr[i]));
+            }
+            std::vector<int32_t> stop_token_ids(stop_token_ids_ptr, stop_token_ids_ptr + stop_token_ids_len);
+
+            return xgrammar::TokenizerInfo(
+                encoded_vocab,
+                vocab_type,
+                vocab_size_i32,
+                stop_token_ids,
+                add_prefix_space
+            );
+        }))
+    }
+
+    // // VocabType GetVocabType() const;
+    pub fn get_vocab_type(&self) -> VocabType {
+        cpp!(unsafe [self as "const xgrammar::TokenizerInfo*"] -> VocabType as "xgrammar::VocabType" {
+            return self->GetVocabType();
+        })
+    }
+
+    // bool GetAddPrefixSpace() const;
+    pub fn get_add_prefix_space(&self) -> bool {
+        cpp!(unsafe [self as "const xgrammar::TokenizerInfo*"] -> bool as "bool" {
+            return self->GetAddPrefixSpace();
+        })
+    }
+
+    // int GetVocabSize() const;
+    pub fn get_vocab_size(&self) -> i32 {
+        cpp!(unsafe [self as "const xgrammar::TokenizerInfo*"] -> i32 as "int" {
+            return self->GetVocabSize();
+        })
+    }
+
+    // const std::vector<std::string>& GetDecodedVocab() const;
+    pub fn get_decoded_vocab(&self) -> Vec<String> {
+        cpp!(unsafe [self as "const xgrammar::TokenizerInfo*"] -> Vec<String> as "std::vector<std::string>" {
+            return self->GetDecodedVocab();
+        })
+    }
+
+    fn detect_metadata_from_hf(backend_str: &str) -> MetadataFromHF {
+        let backend_str =
+            CString::new(backend_str).expect("Failed to convert backend_str to CString");
+        let backend_str_ptr = backend_str.as_ptr();
+
+        cpp!(unsafe [backend_str_ptr as "const char*"] -> MetadataFromHF as "MetadataFromHF" {
+            const std::string &backend_str(backend_str_ptr);
+            std::string metadata_str = TokenizerInfo::DetectMetadataFromHF(backend_str);
+            picojson::value v;
+            std::string err = picojson::parse(v, metadata_str);
+            if (!err.empty()) {
+                throw std::runtime_error("Failed to parse metadata: " + err);
+            }
+            const picojson::object& metadata = v.get<picojson::object>();
+
+            MetadataFromHF metadata_from_hf;
+            metadata_from_hf.vocab_type = static_cast<xgrammar::VocabType>(metadata["vocab_type"].get<double>());
+            metadata_from_hf.add_prefix_space = metadata["add_prefix_space"].get<bool>();
+            return metadata_from_hf;
+        })
+    }
+}
+
 impl CompiledGrammar {
     pub fn get_grammar(&self) -> Grammar {
         cpp!(unsafe [self as "const xgrammar::CompiledGrammar*"] -> Grammar as "xgrammar::Grammar" {
@@ -516,222 +733,5 @@ impl GrammarMatcher {
     /// const std::vector<int>& GetStopTokenIds() const;
     pub fn get_stop_token_ids(&self) -> Vec<i32> {
         unimplemented!()
-    }
-}
-
-impl TokenizerInfo {
-    pub fn from_backend_str(
-        backend_str: &str,
-        vocab_size: Option<usize>,
-        stop_token_ids: Vec<TokenId>,
-    ) -> self::Result<Self> {
-        let backend_json: serde_json::Value =
-            serde_json::from_str(backend_str).expect("Failed to parse backend string as JSON");
-        let model = get_json_field(&backend_json, TOKENIZER_MODEL_KEY)?;
-        let vocab_map = get_json_field(model, TOKENIZER_VOCAB_KEY)?;
-        let vocab_map: HashMap<String, u32> =
-            serde_json::from_value(vocab_map.clone()).map_err(|e| {
-                XGrammarErr::TokenizerParseFailed(format!("Failed to parse vocab map: {}", e))
-            })?;
-
-        let max_id = vocab_map
-            .values()
-            .max()
-            .ok_or(XGrammarErr::InvalidTokenizerConfig("Vocab map is empty".to_string()))?;
-        let tokenizer_vocab_size = std::cmp::max(vocab_map.len(), (max_id + 1) as usize);
-        let final_vocab_size = vocab_size.unwrap_or(tokenizer_vocab_size);
-
-        let tokenizer_metadata = Self::detect_metadata_from_hf(backend_str);
-        let vocab_type = tokenizer_metadata.vocab_type;
-        let add_prefix_space = tokenizer_metadata.add_prefix_space;
-
-        Self::new(vocab_map, vocab_type, final_vocab_size, stop_token_ids, add_prefix_space)
-    }
-
-    #[cfg(feature = "hf_hub")]
-    fn get_config(path: &Path) -> self::Result<Value> {
-        let config_path = path.join("config.json");
-        let content =
-            std::fs::read_to_string(&config_path).map_err(XGrammarErr::TokenizerLoadFailed)?;
-        let config: Value = serde_json::from_str(&content)?;
-        Ok(config)
-    }
-
-    #[cfg(feature = "hf_hub")]
-    fn from_path<P>(
-        path: P,
-        vocab_size: Option<usize>,
-        stop_token_ids: Option<Vec<TokenId>>,
-    ) -> Result<Self>
-    where
-        P: AsRef<Path>,
-    {
-        let path = path.as_ref();
-        let tokenizer_json_path = path.join(TOKENIZER_FILE);
-        let backend_str = std::fs::read_to_string(&tokenizer_json_path)
-            .map_err(XGrammarErr::TokenizerLoadFailed)?;
-
-        let hf_config = Self::get_config(path)?;
-        let eos_token = get_json_field(&hf_config, HF_CONFIG_EOS_TOKEN_ID_KEY)?;
-
-        let mut stop_token_ids = stop_token_ids.unwrap_or_default();
-
-        match eos_token {
-            Value::Number(eos_token_id) => {
-                if eos_token_id.is_i64() {
-                    let eos_token_id = eos_token_id.as_i64().unwrap() as i32;
-                    stop_token_ids.push(eos_token_id);
-                } else {
-                    return Err(XGrammarErr::TokenizerParseFailed(
-                        "eos_token must be an integer".to_string(),
-                    ));
-                }
-            }
-            Value::Array(eos_token_ids) => {
-                for token in eos_token_ids {
-                    if token.is_i64() {
-                        let token_id = token.as_i64().unwrap() as i32;
-                        stop_token_ids.push(token_id);
-                    } else {
-                        return Err(XGrammarErr::TokenizerParseFailed(
-                            "eos_token array must contain integers".to_string(),
-                        ));
-                    }
-                }
-            }
-            _ => {
-                return Err(XGrammarErr::TokenizerParseFailed(
-                    "eos_token must be a string or an array of strings".to_string(),
-                ));
-            }
-        }
-
-        Self::from_backend_str(&backend_str, vocab_size, stop_token_ids)
-    }
-
-    #[cfg(feature = "hf_hub")]
-    pub fn from_pretrained(
-        tokenizer_id: &str,
-        revision: Option<String>,
-        vocab_size: Option<usize>,
-        stop_token_ids: Option<Vec<i32>>,
-    ) -> Result<TokenizerInfo> {
-        use huggingface_hub::{Params, Repo, RepoType, compile_glob_pattern, snapshot_download};
-
-        let allow_patterns = compile_glob_pattern(TOKENIZER_ALLOW_PATTERN).map_err(|e| {
-            XGrammarErr::TokenizerParseFailed(format!("Failed to compile glob patterns: {}", e))
-        })?;
-        let download_options =
-            Some(Params { allow_patterns: Some(allow_patterns), ..Default::default() });
-
-        let repo = Repo::with_revision(
-            tokenizer_id.to_string(),
-            RepoType::Model,
-            revision.unwrap_or("main".to_string()),
-        );
-        let tokenizer_dir = snapshot_download(repo, download_options)?;
-        Self::from_path(tokenizer_dir, vocab_size, stop_token_ids)
-    }
-
-    fn new(
-        vocab_map: HashMap<String, u32>,
-        vocab_type: VocabType,
-        vocab_size: usize,
-        stop_token_ids: Vec<i32>,
-        add_prefix_space: bool,
-    ) -> self::Result<Self> {
-        // Ensure the vocab size is at least as large as the max id in the vocab map
-        let mut encoded_vocab = vec![CString::new("").unwrap(); vocab_size];
-
-        // Fill the encoded_vocab with tokens from the vocab_map
-        for (token, idx) in vocab_map.iter() {
-            assert!(
-                (*idx as usize) < vocab_size,
-                "Token ID {} exceeds vocab size {}",
-                idx,
-                vocab_size
-            );
-            encoded_vocab[*idx as usize] =
-                CString::new(token.as_str()).expect("fail to convert a token to CString");
-        }
-
-        let encoded_vocab_ptr: Vec<_> = encoded_vocab.iter().map(|s| s.as_ptr()).collect();
-        let encoded_vocab_ptr_ptr = encoded_vocab_ptr.as_ptr();
-        let vocab_size_i32 = vocab_size as i32;
-        let stop_token_ids_ptr = stop_token_ids.as_ptr();
-        let stop_token_ids_len = stop_token_ids.len();
-
-        Ok(cpp!(unsafe [
-            encoded_vocab_ptr_ptr as "const char* const*",
-            vocab_type as "xgrammar::VocabType",
-            vocab_size_i32 as "int",
-            stop_token_ids_ptr as "const int32_t*",
-            stop_token_ids_len as "size_t",
-            add_prefix_space as "bool"
-        ] -> TokenizerInfo as "xgrammar::TokenizerInfo" {
-            std::vector<std::string> encoded_vocab;
-            for (int i = 0; i < vocab_size_i32; ++i) {
-                encoded_vocab.push_back(std::string(encoded_vocab_ptr_ptr[i]));
-            }
-            std::vector<int32_t> stop_token_ids(stop_token_ids_ptr, stop_token_ids_ptr + stop_token_ids_len);
-
-            return xgrammar::TokenizerInfo(
-                encoded_vocab,
-                vocab_type,
-                vocab_size_i32,
-                stop_token_ids,
-                add_prefix_space
-            );
-        }))
-    }
-
-    // // VocabType GetVocabType() const;
-    pub fn get_vocab_type(&self) -> VocabType {
-        cpp!(unsafe [self as "const xgrammar::TokenizerInfo*"] -> VocabType as "xgrammar::VocabType" {
-            return self->GetVocabType();
-        })
-    }
-
-    // bool GetAddPrefixSpace() const;
-    pub fn get_add_prefix_space(&self) -> bool {
-        cpp!(unsafe [self as "const xgrammar::TokenizerInfo*"] -> bool as "bool" {
-            return self->GetAddPrefixSpace();
-        })
-    }
-
-    // int GetVocabSize() const;
-    pub fn get_vocab_size(&self) -> i32 {
-        cpp!(unsafe [self as "const xgrammar::TokenizerInfo*"] -> i32 as "int" {
-            return self->GetVocabSize();
-        })
-    }
-
-    // const std::vector<std::string>& GetDecodedVocab() const;
-    pub fn get_decoded_vocab(&self) -> Vec<String> {
-        cpp!(unsafe [self as "const xgrammar::TokenizerInfo*"] -> Vec<String> as "std::vector<std::string>" {
-            return self->GetDecodedVocab();
-        })
-    }
-
-    fn detect_metadata_from_hf(backend_str: &str) -> MetadataFromHF {
-        let backend_str =
-            CString::new(backend_str).expect("Failed to convert backend_str to CString");
-        let backend_str_ptr = backend_str.as_ptr();
-
-        cpp!(unsafe [backend_str_ptr as "const char*"] -> MetadataFromHF as "MetadataFromHF" {
-            const std::string &backend_str(backend_str_ptr);
-            std::string metadata_str = TokenizerInfo::DetectMetadataFromHF(backend_str);
-            picojson::value v;
-            std::string err = picojson::parse(v, metadata_str);
-            if (!err.empty()) {
-                throw std::runtime_error("Failed to parse metadata: " + err);
-            }
-            const picojson::object& metadata = v.get<picojson::object>();
-
-            MetadataFromHF metadata_from_hf;
-            metadata_from_hf.vocab_type = static_cast<xgrammar::VocabType>(metadata["vocab_type"].get<double>());
-            metadata_from_hf.add_prefix_space = metadata["add_prefix_space"].get<bool>();
-            return metadata_from_hf;
-        })
     }
 }
