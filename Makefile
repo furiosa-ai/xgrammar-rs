@@ -1,4 +1,5 @@
 install-cargo-deps:
+	rustup component add clippy rustfmt
 	cargo install cargo-machete@0.7.0 cargo-sort
 
 lint:
