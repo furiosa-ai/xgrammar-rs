@@ -166,9 +166,9 @@ fn test_compile_structural_tag() {
     // Test with simple structural tags
     let tags = vec![
         StructuralTagItem::new(
-            "<thinking>".to_string(),
+            "<question>".to_string(),
             r#"{"type": "string"}"#.to_string(),
-            "</thinking>".to_string(),
+            "</question>".to_string(),
         ),
         StructuralTagItem::new(
             "<answer>".to_string(),
@@ -177,7 +177,7 @@ fn test_compile_structural_tag() {
         ),
     ];
 
-    let triggers = vec!["<thinking>".to_string(), "<answer>".to_string()];
+    let triggers = vec!["<question>".to_string(), "<answer>".to_string()];
 
     let compiled_grammar = compiler.compile_structural_tag(&tags, &triggers);
     assert!(compiled_grammar.memory_size_bytes() > 0);

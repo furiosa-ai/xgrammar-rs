@@ -3,8 +3,9 @@ mod error;
 pub mod huggingface_hub;
 mod utils;
 
+use std::collections::HashMap;
+use std::ffi::CString;
 use std::path::Path;
-use std::{collections::HashMap, ffi::CString};
 
 use cpp::{cpp, cpp_class};
 use dlpark::{traits::TensorView, versioned::SafeManagedTensorVersioned as DLTensor};
@@ -584,6 +585,198 @@ impl GrammarCompiler {
             }
 
             return self->CompileStructuralTag(tags_vector, triggers_vector);
+        })
+    }
+}
+
+impl Grammar {
+    /// Construct a BNF grammar with a EBNF-formatted string.
+    pub fn from_ebnf(ebnf_string: &str, root_rule_name: Option<&str>) -> Self {
+        let ebnf_string_cstring =
+            CString::new(ebnf_string).expect("Failed to convert ebnf_string to CString");
+        let ebnf_string_ptr = ebnf_string_cstring.as_ptr();
+        let root_rule_name = root_rule_name.unwrap_or("root");
+        let root_rule_name_cstring =
+            CString::new(root_rule_name).expect("Failed to convert root_rule_name to CString");
+        let root_rule_name_ptr = root_rule_name_cstring.as_ptr();
+
+        cpp!(unsafe [
+            ebnf_string_ptr as "const char*",
+            root_rule_name_ptr as "const char*"
+        ] -> Grammar as "xgrammar::Grammar" {
+            return xgrammar::Grammar::FromEBNF(std::string(ebnf_string_ptr), std::string(root_rule_name_ptr));
+        })
+    }
+
+    /// Construct a BNF grammar from the json schema string.
+    pub fn from_json_schema(
+        schema: &str,
+        any_whitespace: Option<bool>,
+        indent: Option<i32>,
+        separators: Option<(String, String)>,
+        strict_mode: Option<bool>,
+        print_converted_ebnf: Option<bool>,
+    ) -> Self {
+        let schema_cstring = CString::new(schema).expect("Failed to convert schema to CString");
+        let schema_ptr = schema_cstring.as_ptr();
+        let any_whitespace = any_whitespace.unwrap_or(true);
+        let strict_mode = strict_mode.unwrap_or(true);
+        let print_converted_ebnf = print_converted_ebnf.unwrap_or(false);
+        let has_indent = indent.is_some();
+        let indent_value = indent.unwrap_or(0);
+        let has_separators = separators.is_some();
+
+        let (_obj_sep_cstring, _array_sep_cstring, obj_sep_ptr, array_sep_ptr) =
+            if let Some((obj_sep, array_sep)) = separators {
+                let obj_sep_cstring =
+                    CString::new(obj_sep).expect("Failed to convert object separator to CString");
+                let array_sep_cstring =
+                    CString::new(array_sep).expect("Failed to convert array separator to CString");
+                let obj_sep_ptr = obj_sep_cstring.as_ptr();
+                let array_sep_ptr = array_sep_cstring.as_ptr();
+                (Some(obj_sep_cstring), Some(array_sep_cstring), obj_sep_ptr, array_sep_ptr)
+            } else {
+                (None, None, std::ptr::null(), std::ptr::null())
+            };
+
+        cpp!(unsafe [
+            schema_ptr as "const char*",
+            any_whitespace as "bool",
+            has_indent as "bool",
+            indent_value as "int",
+            has_separators as "bool",
+            obj_sep_ptr as "const char*",
+            array_sep_ptr as "const char*",
+            strict_mode as "bool",
+            print_converted_ebnf as "bool"
+        ] -> Grammar as "xgrammar::Grammar" {
+            std::string schema_str(schema_ptr);
+            std::optional<int> opt_indent = has_indent ? std::make_optional(indent_value) : std::nullopt;
+            std::optional<std::pair<std::string, std::string>> opt_separators;
+
+            if (has_separators) {
+                opt_separators = std::make_pair(std::string(obj_sep_ptr), std::string(array_sep_ptr));
+            } else {
+                opt_separators = std::nullopt;
+            }
+
+            return xgrammar::Grammar::FromJSONSchema(
+                schema_str,
+                any_whitespace,
+                opt_indent,
+                opt_separators,
+                strict_mode,
+                print_converted_ebnf
+            );
+        })
+    }
+
+    /// Construct a grammar from a regular expression string.
+    pub fn from_regex(regex: &str, print_converted_ebnf: Option<bool>) -> Self {
+        let regex_cstring = CString::new(regex).expect("Failed to convert regex to CString");
+        let regex_ptr = regex_cstring.as_ptr();
+        let print_converted_ebnf = print_converted_ebnf.unwrap_or(false);
+
+        cpp!(unsafe [
+            regex_ptr as "const char*",
+            print_converted_ebnf as "bool"
+        ] -> Grammar as "xgrammar::Grammar" {
+            return xgrammar::Grammar::FromRegex(std::string(regex_ptr), print_converted_ebnf);
+        })
+    }
+
+    /// Construct a grammar from a structural tag.
+    pub fn from_structural_tag(tags: &[StructuralTagItem], triggers: &[String]) -> Self {
+        let (_begin_cstrings, tag_begin_ptrs) =
+            GrammarCompiler::extract_field_to_cstring_ptrs(tags, |tag| &tag.begin);
+        let (_schema_cstrings, tag_schema_ptrs) =
+            GrammarCompiler::extract_field_to_cstring_ptrs(tags, |tag| &tag.schema);
+        let (_end_cstrings, tag_end_ptrs) =
+            GrammarCompiler::extract_field_to_cstring_ptrs(tags, |tag| &tag.end);
+        let (_trigger_cstrings, trigger_ptrs) = GrammarCompiler::strings_to_cstring_ptrs(triggers);
+
+        let num_tags = tags.len();
+        let num_triggers = triggers.len();
+
+        let tag_begin_ptrs_ptr = tag_begin_ptrs.as_ptr();
+        let tag_schema_ptrs_ptr = tag_schema_ptrs.as_ptr();
+        let tag_end_ptrs_ptr = tag_end_ptrs.as_ptr();
+        let trigger_ptrs_ptr = trigger_ptrs.as_ptr();
+
+        cpp!(unsafe [
+            tag_begin_ptrs_ptr as "const char* const*",
+            tag_schema_ptrs_ptr as "const char* const*",
+            tag_end_ptrs_ptr as "const char* const*",
+            num_tags as "size_t",
+            trigger_ptrs_ptr as "const char* const*",
+            num_triggers as "size_t"
+        ] -> Grammar as "xgrammar::Grammar" {
+            std::vector<xgrammar::StructuralTagItem> tags_vector;
+            tags_vector.reserve(num_tags);
+
+            for (size_t i = 0; i < num_tags; ++i) {
+                tags_vector.emplace_back(xgrammar::StructuralTagItem{
+                    std::string(tag_begin_ptrs_ptr[i]),
+                    std::string(tag_schema_ptrs_ptr[i]),
+                    std::string(tag_end_ptrs_ptr[i])
+                });
+            }
+
+            std::vector<std::string> triggers_vector;
+            triggers_vector.reserve(num_triggers);
+            for (size_t i = 0; i < num_triggers; ++i) {
+                triggers_vector.emplace_back(std::string(trigger_ptrs_ptr[i]));
+            }
+
+            return xgrammar::Grammar::FromStructuralTag(tags_vector, triggers_vector);
+        })
+    }
+
+    /// Get the grammar of standard JSON format.
+    pub fn builtin_json_grammar() -> Self {
+        cpp!(unsafe [] -> Grammar as "xgrammar::Grammar" {
+            return xgrammar::Grammar::BuiltinJSONGrammar();
+        })
+    }
+
+    /// Create a grammar that matches any of the grammars in the list.
+    pub fn union(grammars: &[Grammar]) -> Self {
+        let grammars_ptr = grammars.as_ptr();
+        let num_grammars = grammars.len();
+        cpp!(unsafe [
+            grammars_ptr as "const xgrammar::Grammar*",
+            num_grammars as "size_t"
+        ] -> Grammar as "xgrammar::Grammar" {
+            std::vector<xgrammar::Grammar> grammars_vec;
+            grammars_vec.reserve(num_grammars);
+            for (size_t i = 0; i < num_grammars; ++i) {
+                grammars_vec.push_back(grammars_ptr[i]);
+            }
+            return xgrammar::Grammar::Union(grammars_vec);
+        })
+    }
+
+    /// Create a grammar that matches the concatenation of the grammars in the list.
+    pub fn concat(grammars: &[Grammar]) -> Self {
+        let grammars_ptr = grammars.as_ptr();
+        let num_grammars = grammars.len();
+        cpp!(unsafe [
+            grammars_ptr as "const xgrammar::Grammar*",
+            num_grammars as "size_t"
+        ] -> Grammar as "xgrammar::Grammar" {
+            std::vector<xgrammar::Grammar> grammars_vec;
+            grammars_vec.reserve(num_grammars);
+            for (size_t i = 0; i < num_grammars; ++i) {
+                grammars_vec.push_back(grammars_ptr[i]);
+            }
+            return xgrammar::Grammar::Concat(grammars_vec);
+        })
+    }
+
+    /// Check if the grammar object is null.
+    pub fn is_null(&self) -> bool {
+        cpp!(unsafe [self as "const xgrammar::Grammar*"] -> bool as "bool" {
+            return self->IsNull();
         })
     }
 }
