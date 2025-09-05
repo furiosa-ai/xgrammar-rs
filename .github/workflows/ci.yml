@@ -18,7 +18,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y cmake clang
+        run: |
+          sudo apt-get update && sudo apt-get install -y cmake clang
+          make install-cargo-deps
 
       - name: Run lint checks
         run: make lint
