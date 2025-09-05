@@ -909,18 +909,6 @@ impl GrammarMatcher {
         })
     }
 
-    /// Find the jump-forward string for jump-forward decoding. This is the longest string that
-    /// will be valid according to the current syntax.
-    ///
-    /// # Note
-    /// This method does not change the grammar state.
-    pub fn find_jump_forward_string(&self) -> String {
-        // cpp!(unsafe [self as "const xgrammar::GrammarMatcher*"] -> String as "std::string" {
-        //     return self->FindJumpForwardString();
-        // })
-        unimplemented!()
-    }
-
     /// Rollback the matcher to a previous state.
     ///
     /// # Arguments
@@ -947,8 +935,9 @@ impl GrammarMatcher {
         })
     }
 
-    /// const std::vector<int>& GetStopTokenIds() const;
     pub fn get_stop_token_ids(&self) -> Vec<i32> {
-        unimplemented!()
+        cpp!(unsafe [self as "const xgrammar::GrammarMatcher*"] -> Vec<i32> as "std::vector<int>" {
+            return self->GetStopTokenIds();
+        })
     }
 }
