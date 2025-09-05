@@ -333,6 +333,8 @@ impl CompiledGrammar {
     }
 }
 
+// TODO: xgrammar::GrammarCompiler cpp implementations cannot handle invalid inputs gracefully.
+//  We should add error handling in application layer.
 impl GrammarCompiler {
     /// Create a new GrammarCompiler with default parameters.
     /// # Arguments
@@ -378,6 +380,22 @@ impl GrammarCompiler {
         });
 
         grammar_compiler
+    }
+
+    /// Get the compiled grammar for a given grammar.
+    ///
+    /// # Arguments
+    /// * `grammar` - The grammar to compile
+    ///
+    /// # Returns
+    /// * A compiled grammar that can be used with GrammarMatcher
+    pub fn compile_grammar(&mut self, grammar: &Grammar) -> CompiledGrammar {
+        cpp!(unsafe [
+            self as "xgrammar::GrammarCompiler*",
+            grammar as "const xgrammar::Grammar*"
+        ] -> CompiledGrammar as "xgrammar::CompiledGrammar" {
+            return self->CompileGrammar(*grammar);
+        })
     }
 
     /// Get the compiled grammar for pure JSON.

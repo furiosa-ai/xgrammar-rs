@@ -1,3 +1,5 @@
+mod common;
+
 use std::collections::HashSet;
 
 use hf_hub::RepoType;

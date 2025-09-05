@@ -30,11 +30,7 @@ cpp_build = "0.5.10"
 ctor = "0.2"
 
 [[test]]
-name = "test_tokenizer_info"
-required-features = ["hf_hub"]
-
-[[test]]
-name = "test_huggingface_hub"
+name = "test_compiled_grammar"
 required-features = ["hf_hub"]
 
 [[test]]
@@ -42,7 +38,13 @@ name = "test_grammar_compiler"
 required-features = ["hf_hub"]
 
 [[test]]
-name = "test_invalid_schemas"
+name = "test_grammar"
 required-features = ["hf_hub"]
 
+[[test]]
+name = "test_huggingface_hub"
+required-features = ["hf_hub"]
 
+[[test]]
+name = "test_tokenizer_info"
+required-features = ["hf_hub"]
