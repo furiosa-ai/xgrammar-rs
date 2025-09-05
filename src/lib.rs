@@ -134,6 +134,117 @@ impl GrammarCompiler {
             return self->CompileBuiltinJSONGrammar();
         })
     }
+
+    /// Get the compiled grammar for a JSON schema string.
+    ///
+    /// # Arguments
+    /// * `schema` - The JSON schema string to compile
+    /// * `any_whitespace` - Whether to allow any whitespace (default: true)
+    /// * `indent` - Optional indentation level
+    /// * `separators` - Optional custom separators (object_separator, array_separator)
+    /// * `strict_mode` - Whether to use strict mode (default: true)
+    ///
+    /// # Returns
+    /// * A compiled grammar that can be used with GrammarMatcher
+    pub fn compile_json_schema(
+        &mut self,
+        schema: &str,
+        any_whitespace: Option<bool>,
+        indent: Option<i32>,
+        separators: Option<(String, String)>,
+        strict_mode: Option<bool>,
+    ) -> CompiledGrammar {
+        let schema_cstring = CString::new(schema).expect("Failed to convert schema to CString");
+        let schema_ptr = schema_cstring.as_ptr();
+        let any_whitespace = any_whitespace.unwrap_or(true);
+        let strict_mode = strict_mode.unwrap_or(true);
+        let has_indent = indent.is_some();
+        let indent_value = indent.unwrap_or(0);
+        let has_separators = separators.is_some();
+        
+        let (_obj_sep_cstring, _array_sep_cstring, obj_sep_ptr, array_sep_ptr) = 
+            if let Some((obj_sep, array_sep)) = separators {
+                let obj_sep_cstring = CString::new(obj_sep).expect("Failed to convert object separator to CString");
+                let array_sep_cstring = CString::new(array_sep).expect("Failed to convert array separator to CString");
+                let obj_sep_ptr = obj_sep_cstring.as_ptr();
+                let array_sep_ptr = array_sep_cstring.as_ptr();
+                (Some(obj_sep_cstring), Some(array_sep_cstring), obj_sep_ptr, array_sep_ptr)
+            } else {
+                (None, None, std::ptr::null(), std::ptr::null())
+            };
+
+        cpp!(unsafe [
+            self as "xgrammar::GrammarCompiler*",
+            schema_ptr as "const char*",
+            any_whitespace as "bool",
+            has_indent as "bool",
+            indent_value as "int",
+            has_separators as "bool",
+            obj_sep_ptr as "const char*",
+            array_sep_ptr as "const char*",
+            strict_mode as "bool"
+        ] -> CompiledGrammar as "xgrammar::CompiledGrammar" {
+            std::string schema_str(schema_ptr);
+            std::optional<int> opt_indent = has_indent ? std::make_optional(indent_value) : std::nullopt;
+            std::optional<std::pair<std::string, std::string>> opt_separators;
+            
+            if (has_separators) {
+                opt_separators = std::make_pair(std::string(obj_sep_ptr), std::string(array_sep_ptr));
+            } else {
+                opt_separators = std::nullopt;
+            }
+            
+            return self->CompileJSONSchema(schema_str, any_whitespace, opt_indent, opt_separators, strict_mode);
+        })
+    }
+
+    /// Get the compiled grammar for a regex pattern.
+    ///
+    /// # Arguments
+    /// * `regex` - The regex pattern string to compile
+    ///
+    /// # Returns
+    /// * A compiled grammar that can be used with GrammarMatcher
+    pub fn compile_regex(&mut self, regex: &str) -> CompiledGrammar {
+        let regex_cstring = CString::new(regex).expect("Failed to convert regex to CString");
+        let regex_ptr = regex_cstring.as_ptr();
+
+        cpp!(unsafe [
+            self as "xgrammar::GrammarCompiler*",
+            regex_ptr as "const char*"
+        ] -> CompiledGrammar as "xgrammar::CompiledGrammar" {
+            std::string regex_str(regex_ptr);
+            return self->CompileRegex(regex_str);
+        })
+    }
+
+    /// Clear the internal cache of compiled grammars.
+    /// This frees up memory used by cached compiled grammars.
+    pub fn clear_cache(&mut self) {
+        cpp!(unsafe [self as "xgrammar::GrammarCompiler*"] {
+            self->ClearCache();
+        })
+    }
+
+    /// Return the approximate memory usage of the compiler cache in bytes.
+    ///
+    /// # Returns
+    /// * The current cache size in bytes
+    pub fn get_cache_size_bytes(&self) -> i64 {
+        cpp!(unsafe [self as "const xgrammar::GrammarCompiler*"] -> i64 as "long long" {
+            return self->GetCacheSizeBytes();
+        })
+    }
+
+    /// Return the cache limit in bytes. -1 means unlimited.
+    ///
+    /// # Returns
+    /// * The cache limit in bytes, or -1 for unlimited
+    pub fn cache_limit_bytes(&self) -> i64 {
+        cpp!(unsafe [self as "const xgrammar::GrammarCompiler*"] -> i64 as "long long" {
+            return self->CacheLimitBytes();
+        })
+    }
 }
 
 impl GrammarMatcher {
@@ -504,4 +615,3 @@ impl TokenizerInfo {
         })
     }
 }
-

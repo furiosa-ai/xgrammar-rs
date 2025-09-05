@@ -37,4 +37,12 @@ required-features = ["hf_hub"]
 name = "test_huggingface_hub"
 required-features = ["hf_hub"]
 
+[[test]]
+name = "test_grammar_compiler"
+required-features = ["hf_hub"]
+
+[[test]]
+name = "test_invalid_schemas"
+required-features = ["hf_hub"]
+
 
