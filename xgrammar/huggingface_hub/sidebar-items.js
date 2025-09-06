@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"enum":["ApiError","HuggingfaceError","RepoType"],"fn":["compile_glob_pattern","snapshot_download"],"struct":["Api","ApiBuilder","ApiRepo","Params","Repo","RepoInfo"]};

@@ -1,0 +1,9 @@
+(function() {
+    var implementors = Object.fromEntries([["xgrammar",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html\" title=\"trait core::fmt::Debug\">Debug</a> for <a class=\"enum\" href=\"xgrammar/enum.VocabType.html\" title=\"enum xgrammar::VocabType\">VocabType</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html\" title=\"trait core::fmt::Debug\">Debug</a> for <a class=\"enum\" href=\"xgrammar/huggingface_hub/enum.HuggingfaceError.html\" title=\"enum xgrammar::huggingface_hub::HuggingfaceError\">HuggingfaceError</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html\" title=\"trait core::fmt::Debug\">Debug</a> for <a class=\"struct\" href=\"xgrammar/huggingface_hub/struct.Params.html\" title=\"struct xgrammar::huggingface_hub::Params\">Params</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html\" title=\"trait core::fmt::Debug\">Debug</a> for <a class=\"struct\" href=\"xgrammar/struct.MetadataFromHF.html\" title=\"struct xgrammar::MetadataFromHF\">MetadataFromHF</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/fmt/trait.Debug.html\" title=\"trait core::fmt::Debug\">Debug</a> for <a class=\"struct\" href=\"xgrammar/struct.StructuralTagItem.html\" title=\"struct xgrammar::StructuralTagItem\">StructuralTagItem</a>"]]]]);
+    if (window.register_implementors) {
+        window.register_implementors(implementors);
+    } else {
+        window.pending_implementors = implementors;
+    }
+})()
+//{"start":57,"fragment_lengths":[1394]}
