@@ -8,7 +8,7 @@ const EXAONE_4_0_32B_PRETRAINED_ID: &str = "LGAI-EXAONE/EXAONE-4.0-32B";
 fn test_compile_builtin_json_grammar() {
     let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
         .expect("Failed to load tokenizer info");
-    let mut compiler = GrammarCompiler::new(&tok_info);
+    let compiler = GrammarCompiler::new(&tok_info);
     let compiled_grammar = compiler.compile_builtin_json_grammar();
 
     assert!(compiled_grammar.memory_size_bytes() > 0);
@@ -20,7 +20,7 @@ fn test_compile_builtin_json_grammar() {
 fn test_cache_management() {
     let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
         .expect("Failed to load tokenizer info");
-    let mut compiler = GrammarCompiler::new(&tok_info);
+    let compiler = GrammarCompiler::new(&tok_info);
 
     // Check initial cache state
     let initial_cache_size = compiler.get_cache_size_bytes();
@@ -94,7 +94,7 @@ fn test_cache_properties() {
 fn test_compile_json_schema() {
     let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
         .expect("Failed to load tokenizer info");
-    let mut compiler = GrammarCompiler::new(&tok_info);
+    let compiler = GrammarCompiler::new(&tok_info);
 
     // Test with a simple JSON schema
     let schema = r#"{
@@ -138,7 +138,7 @@ fn test_compile_json_schema() {
 fn test_compile_regex() {
     let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
         .expect("Failed to load tokenizer info");
-    let mut compiler = GrammarCompiler::new(&tok_info);
+    let compiler = GrammarCompiler::new(&tok_info);
 
     // Test simple regex patterns
     let regex_patterns = vec![
@@ -161,7 +161,7 @@ fn test_compile_regex() {
 fn test_compile_structural_tag() {
     let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
         .expect("Failed to load tokenizer info");
-    let mut compiler = GrammarCompiler::new(&tok_info);
+    let compiler = GrammarCompiler::new(&tok_info);
 
     // Test with simple structural tags
     let tags = vec![
@@ -225,7 +225,7 @@ fn test_compile_structural_tag_complex() {
 fn test_compile_structural_tag_empty() {
     let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
         .expect("Failed to load tokenizer info");
-    let mut compiler = GrammarCompiler::new(&tok_info);
+    let compiler = GrammarCompiler::new(&tok_info);
 
     // Test with empty tags and triggers
     let tags: Vec<StructuralTagItem> = vec![];

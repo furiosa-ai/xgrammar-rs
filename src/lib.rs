@@ -133,7 +133,7 @@ impl TokenizerInfo {
     }
 
     #[cfg(feature = "hf_hub")]
-    fn from_path<P>(
+    pub fn from_path<P>(
         path: P,
         vocab_size: Option<usize>,
         stop_token_ids: Option<Vec<TokenId>>,
@@ -389,7 +389,7 @@ impl GrammarCompiler {
     ///
     /// # Returns
     /// * A compiled grammar that can be used with GrammarMatcher
-    pub fn compile_grammar(&mut self, grammar: &Grammar) -> CompiledGrammar {
+    pub fn compile_grammar(&self, grammar: &Grammar) -> CompiledGrammar {
         cpp!(unsafe [
             self as "xgrammar::GrammarCompiler*",
             grammar as "const xgrammar::Grammar*"
@@ -399,7 +399,7 @@ impl GrammarCompiler {
     }
 
     /// Get the compiled grammar for pure JSON.
-    pub fn compile_builtin_json_grammar(&mut self) -> CompiledGrammar {
+    pub fn compile_builtin_json_grammar(&self) -> CompiledGrammar {
         cpp!(unsafe [self as "xgrammar::GrammarCompiler*"] -> CompiledGrammar as "xgrammar::CompiledGrammar" {
             return self->CompileBuiltinJSONGrammar();
         })
@@ -417,7 +417,7 @@ impl GrammarCompiler {
     /// # Returns
     /// * A compiled grammar that can be used with GrammarMatcher
     pub fn compile_json_schema(
-        &mut self,
+        &self,
         schema: &str,
         any_whitespace: Option<bool>,
         indent: Option<i32>,
@@ -477,7 +477,7 @@ impl GrammarCompiler {
     ///
     /// # Returns
     /// * A compiled grammar that can be used with GrammarMatcher
-    pub fn compile_regex(&mut self, regex: &str) -> CompiledGrammar {
+    pub fn compile_regex(&self, regex: &str) -> CompiledGrammar {
         let regex_cstring = CString::new(regex).expect("Failed to convert regex to CString");
         let regex_ptr = regex_cstring.as_ptr();
 
@@ -555,7 +555,7 @@ impl GrammarCompiler {
     /// # Returns
     /// * A compiled grammar that can be used with GrammarMatcher
     pub fn compile_structural_tag(
-        &mut self,
+        &self,
         tags: &[StructuralTagItem],
         triggers: &[String],
     ) -> CompiledGrammar {
@@ -938,6 +938,13 @@ impl GrammarMatcher {
     pub fn get_stop_token_ids(&self) -> Vec<i32> {
         cpp!(unsafe [self as "const xgrammar::GrammarMatcher*"] -> Vec<i32> as "std::vector<int>" {
             return self->GetStopTokenIds();
+        })
+    }
+
+    /// Reset the matcher to the initial state.
+    pub fn reset(&mut self) {
+        cpp!(unsafe [self as "xgrammar::GrammarMatcher*"] {
+            self->Reset();
         })
     }
 }

@@ -15,7 +15,7 @@ fn test_compiled_grammar() {
     let tokenizer_info =
         TokenizerInfo::from_pretrained(GPT_OSS_20B_PRETRAINED_ID, None, None, None)
             .expect("Failed to load tokenizer info");
-    let mut compiler = GrammarCompiler::new(&tokenizer_info);
+    let compiler = GrammarCompiler::new(&tokenizer_info);
 
     let time_start = Instant::now();
     let compiled_grammar = compiler.compile_grammar(&grammar);
