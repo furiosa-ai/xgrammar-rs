@@ -888,7 +888,7 @@ impl GrammarMatcher {
     ///
     /// # Arguments
     /// * `next_token_bitmask` - The bitmask to store the result. The bitmask must be pre-allocated
-    ///   and with shape (GetBitmaskSize(),) and dtype int32.
+    ///    a DLTensor with shape (tokenizer.GetVocabSize() + 31) / 32, and dtype int32.
     /// * `index` - The index of the bitmask to fill. If None, the first bitmask is filled.
     /// * `debug_print` - If true, print debug information.
     ///
