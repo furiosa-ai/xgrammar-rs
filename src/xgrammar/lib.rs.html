@@ -133,7 +133,7 @@
 <a href=#133 id=133 data-nosnippet>133</a>    }
 <a href=#134 id=134 data-nosnippet>134</a>
 <a href=#135 id=135 data-nosnippet>135</a>    <span class="attr">#[cfg(feature = <span class="string">"hf_hub"</span>)]
-<a href=#136 id=136 data-nosnippet>136</a>    </span><span class="kw">fn </span>from_path&lt;P&gt;(
+<a href=#136 id=136 data-nosnippet>136</a>    </span><span class="kw">pub fn </span>from_path&lt;P&gt;(
 <a href=#137 id=137 data-nosnippet>137</a>        path: P,
 <a href=#138 id=138 data-nosnippet>138</a>        vocab_size: <span class="prelude-ty">Option</span>&lt;usize&gt;,
 <a href=#139 id=139 data-nosnippet>139</a>        stop_token_ids: <span class="prelude-ty">Option</span>&lt;Vec&lt;TokenId&gt;&gt;,
@@ -389,7 +389,7 @@
 <a href=#389 id=389 data-nosnippet>389</a>    ///
 <a href=#390 id=390 data-nosnippet>390</a>    /// # Returns
 <a href=#391 id=391 data-nosnippet>391</a>    /// * A compiled grammar that can be used with GrammarMatcher
-<a href=#392 id=392 data-nosnippet>392</a>    </span><span class="kw">pub fn </span>compile_grammar(<span class="kw-2">&amp;mut </span><span class="self">self</span>, grammar: <span class="kw-2">&amp;</span>Grammar) -&gt; CompiledGrammar {
+<a href=#392 id=392 data-nosnippet>392</a>    </span><span class="kw">pub fn </span>compile_grammar(<span class="kw-2">&amp;</span><span class="self">self</span>, grammar: <span class="kw-2">&amp;</span>Grammar) -&gt; CompiledGrammar {
 <a href=#393 id=393 data-nosnippet>393</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[
 <a href=#394 id=394 data-nosnippet>394</a>            <span class="self">self </span><span class="kw">as </span><span class="string">"xgrammar::GrammarCompiler*"</span>,
 <a href=#395 id=395 data-nosnippet>395</a>            grammar <span class="kw">as </span><span class="string">"const xgrammar::Grammar*"
@@ -399,7 +399,7 @@
 <a href=#399 id=399 data-nosnippet>399</a>    }
 <a href=#400 id=400 data-nosnippet>400</a>
 <a href=#401 id=401 data-nosnippet>401</a>    <span class="doccomment">/// Get the compiled grammar for pure JSON.
-<a href=#402 id=402 data-nosnippet>402</a>    </span><span class="kw">pub fn </span>compile_builtin_json_grammar(<span class="kw-2">&amp;mut </span><span class="self">self</span>) -&gt; CompiledGrammar {
+<a href=#402 id=402 data-nosnippet>402</a>    </span><span class="kw">pub fn </span>compile_builtin_json_grammar(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; CompiledGrammar {
 <a href=#403 id=403 data-nosnippet>403</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[<span class="self">self </span><span class="kw">as </span><span class="string">"xgrammar::GrammarCompiler*"</span>] -&gt; CompiledGrammar <span class="kw">as </span><span class="string">"xgrammar::CompiledGrammar" </span>{
 <a href=#404 id=404 data-nosnippet>404</a>            <span class="kw">return </span><span class="self">self</span>-&gt;CompileBuiltinJSONGrammar();
 <a href=#405 id=405 data-nosnippet>405</a>        })
@@ -417,7 +417,7 @@
 <a href=#417 id=417 data-nosnippet>417</a>    /// # Returns
 <a href=#418 id=418 data-nosnippet>418</a>    /// * A compiled grammar that can be used with GrammarMatcher
 <a href=#419 id=419 data-nosnippet>419</a>    </span><span class="kw">pub fn </span>compile_json_schema(
-<a href=#420 id=420 data-nosnippet>420</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#420 id=420 data-nosnippet>420</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
 <a href=#421 id=421 data-nosnippet>421</a>        schema: <span class="kw-2">&amp;</span>str,
 <a href=#422 id=422 data-nosnippet>422</a>        any_whitespace: <span class="prelude-ty">Option</span>&lt;bool&gt;,
 <a href=#423 id=423 data-nosnippet>423</a>        indent: <span class="prelude-ty">Option</span>&lt;i32&gt;,
@@ -477,7 +477,7 @@
 <a href=#477 id=477 data-nosnippet>477</a>    ///
 <a href=#478 id=478 data-nosnippet>478</a>    /// # Returns
 <a href=#479 id=479 data-nosnippet>479</a>    /// * A compiled grammar that can be used with GrammarMatcher
-<a href=#480 id=480 data-nosnippet>480</a>    </span><span class="kw">pub fn </span>compile_regex(<span class="kw-2">&amp;mut </span><span class="self">self</span>, regex: <span class="kw-2">&amp;</span>str) -&gt; CompiledGrammar {
+<a href=#480 id=480 data-nosnippet>480</a>    </span><span class="kw">pub fn </span>compile_regex(<span class="kw-2">&amp;</span><span class="self">self</span>, regex: <span class="kw-2">&amp;</span>str) -&gt; CompiledGrammar {
 <a href=#481 id=481 data-nosnippet>481</a>        <span class="kw">let </span>regex_cstring = CString::new(regex).expect(<span class="string">"Failed to convert regex to CString"</span>);
 <a href=#482 id=482 data-nosnippet>482</a>        <span class="kw">let </span>regex_ptr = regex_cstring.as_ptr();
 <a href=#483 id=483 data-nosnippet>483</a>
@@ -555,7 +555,7 @@
 <a href=#555 id=555 data-nosnippet>555</a>    /// # Returns
 <a href=#556 id=556 data-nosnippet>556</a>    /// * A compiled grammar that can be used with GrammarMatcher
 <a href=#557 id=557 data-nosnippet>557</a>    </span><span class="kw">pub fn </span>compile_structural_tag(
-<a href=#558 id=558 data-nosnippet>558</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#558 id=558 data-nosnippet>558</a>        <span class="kw-2">&amp;</span><span class="self">self</span>,
 <a href=#559 id=559 data-nosnippet>559</a>        tags: <span class="kw-2">&amp;</span>[StructuralTagItem],
 <a href=#560 id=560 data-nosnippet>560</a>        triggers: <span class="kw-2">&amp;</span>[String],
 <a href=#561 id=561 data-nosnippet>561</a>    ) -&gt; CompiledGrammar {
@@ -940,4 +940,11 @@
 <a href=#940 id=940 data-nosnippet>940</a>            <span class="kw">return </span><span class="self">self</span>-&gt;GetStopTokenIds();
 <a href=#941 id=941 data-nosnippet>941</a>        })
 <a href=#942 id=942 data-nosnippet>942</a>    }
-<a href=#943 id=943 data-nosnippet>943</a>}</code></pre></div></section></main></body></html>
+<a href=#943 id=943 data-nosnippet>943</a>
+<a href=#944 id=944 data-nosnippet>944</a>    <span class="doccomment">/// Reset the matcher to the initial state.
+<a href=#945 id=945 data-nosnippet>945</a>    </span><span class="kw">pub fn </span>reset(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+<a href=#946 id=946 data-nosnippet>946</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[<span class="self">self </span><span class="kw">as </span><span class="string">"xgrammar::GrammarMatcher*"</span>] {
+<a href=#947 id=947 data-nosnippet>947</a>            <span class="self">self</span>-&gt;Reset();
+<a href=#948 id=948 data-nosnippet>948</a>        })
+<a href=#949 id=949 data-nosnippet>949</a>    }
+<a href=#950 id=950 data-nosnippet>950</a>}</code></pre></div></section></main></body></html>
