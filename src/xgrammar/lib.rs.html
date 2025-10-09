@@ -492,7 +492,7 @@
 <a href=#492 id=492 data-nosnippet>492</a>
 <a href=#493 id=493 data-nosnippet>493</a>    <span class="doccomment">/// Clear the internal cache of compiled grammars.
 <a href=#494 id=494 data-nosnippet>494</a>    /// This frees up memory used by cached compiled grammars.
-<a href=#495 id=495 data-nosnippet>495</a>    </span><span class="kw">pub fn </span>clear_cache(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+<a href=#495 id=495 data-nosnippet>495</a>    </span><span class="kw">pub fn </span>clear_cache(<span class="kw-2">&amp;</span><span class="self">self</span>) {
 <a href=#496 id=496 data-nosnippet>496</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[<span class="self">self </span><span class="kw">as </span><span class="string">"xgrammar::GrammarCompiler*"</span>] {
 <a href=#497 id=497 data-nosnippet>497</a>            <span class="self">self</span>-&gt;ClearCache();
 <a href=#498 id=498 data-nosnippet>498</a>        })
@@ -800,151 +800,167 @@
 <a href=#800 id=800 data-nosnippet>800</a>}
 <a href=#801 id=801 data-nosnippet>801</a>
 <a href=#802 id=802 data-nosnippet>802</a><span class="kw">impl </span>GrammarMatcher {
-<a href=#803 id=803 data-nosnippet>803</a>    <span class="kw">pub fn </span>with(
-<a href=#804 id=804 data-nosnippet>804</a>        compiled_grammar: <span class="kw-2">&amp;</span>CompiledGrammar,
-<a href=#805 id=805 data-nosnippet>805</a>        override_stop_tokens: <span class="prelude-ty">Option</span>&lt;Vec&lt;i32&gt;&gt;,
-<a href=#806 id=806 data-nosnippet>806</a>        terminate_without_stop_token: <span class="prelude-ty">Option</span>&lt;bool&gt;,
-<a href=#807 id=807 data-nosnippet>807</a>        max_rollback_tokens: <span class="prelude-ty">Option</span>&lt;i32&gt;,
-<a href=#808 id=808 data-nosnippet>808</a>    ) -&gt; <span class="self">Self </span>{
-<a href=#809 id=809 data-nosnippet>809</a>        <span class="comment">// Keep it sync with the C++ implementation:
-<a href=#810 id=810 data-nosnippet>810</a>        // https://github.com/mlc-ai/xgrammar/blob/95bdfce011506ea95306b37d080115a2da3e369a/cpp/grammar_matcher.cc#L257
-<a href=#811 id=811 data-nosnippet>811</a>        </span><span class="kw">let </span>terminate_without_stop_token = terminate_without_stop_token.unwrap_or(<span class="bool-val">false</span>);
-<a href=#812 id=812 data-nosnippet>812</a>        <span class="kw">let </span>max_rollback_tokens = max_rollback_tokens.unwrap_or(<span class="number">0</span>);
-<a href=#813 id=813 data-nosnippet>813</a>        <span class="kw">let </span>override_stop_tokens_ptr =
-<a href=#814 id=814 data-nosnippet>814</a>            override_stop_tokens.as_ref().map_or(std::ptr::null(), |v| v.as_ptr());
-<a href=#815 id=815 data-nosnippet>815</a>        <span class="kw">let </span>override_stop_tokens_len = override_stop_tokens.as_ref().map_or(<span class="number">0</span>, |v| v.len());
-<a href=#816 id=816 data-nosnippet>816</a>
-<a href=#817 id=817 data-nosnippet>817</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[
-<a href=#818 id=818 data-nosnippet>818</a>            compiled_grammar <span class="kw">as </span><span class="string">"const xgrammar::CompiledGrammar*"</span>,
-<a href=#819 id=819 data-nosnippet>819</a>            override_stop_tokens_ptr <span class="kw">as </span><span class="string">"const int32_t*"</span>,
-<a href=#820 id=820 data-nosnippet>820</a>            override_stop_tokens_len <span class="kw">as </span><span class="string">"size_t"</span>,
-<a href=#821 id=821 data-nosnippet>821</a>            terminate_without_stop_token <span class="kw">as </span><span class="string">"bool"</span>,
-<a href=#822 id=822 data-nosnippet>822</a>            max_rollback_tokens <span class="kw">as </span><span class="string">"int"
-<a href=#823 id=823 data-nosnippet>823</a>        </span>] -&gt; GrammarMatcher <span class="kw">as </span><span class="string">"xgrammar::GrammarMatcher" </span>{
-<a href=#824 id=824 data-nosnippet>824</a>            std::optional&lt;std::vector&lt;int32_t&gt;&gt; opt_override_stop_tokens;
-<a href=#825 id=825 data-nosnippet>825</a>            <span class="kw">if </span>(override_stop_tokens_len &gt; <span class="number">0</span>) {
-<a href=#826 id=826 data-nosnippet>826</a>                opt_override_stop_tokens = std::vector&lt;int32_t&gt;(
-<a href=#827 id=827 data-nosnippet>827</a>                    <span class="kw-2">*</span>override_stop_tokens_ptr,
-<a href=#828 id=828 data-nosnippet>828</a>                    <span class="kw-2">*</span>override_stop_tokens_ptr + override_stop_tokens_len
-<a href=#829 id=829 data-nosnippet>829</a>                );
-<a href=#830 id=830 data-nosnippet>830</a>            } <span class="kw">else </span>{
-<a href=#831 id=831 data-nosnippet>831</a>                opt_override_stop_tokens = std::nullopt;
-<a href=#832 id=832 data-nosnippet>832</a>            }
-<a href=#833 id=833 data-nosnippet>833</a>
-<a href=#834 id=834 data-nosnippet>834</a>            <span class="kw">return </span>xgrammar::GrammarMatcher(
-<a href=#835 id=835 data-nosnippet>835</a>                <span class="kw-2">*</span>compiled_grammar,
-<a href=#836 id=836 data-nosnippet>836</a>                opt_override_stop_tokens,
-<a href=#837 id=837 data-nosnippet>837</a>                terminate_without_stop_token,
-<a href=#838 id=838 data-nosnippet>838</a>                max_rollback_tokens
-<a href=#839 id=839 data-nosnippet>839</a>            );
-<a href=#840 id=840 data-nosnippet>840</a>        })
-<a href=#841 id=841 data-nosnippet>841</a>    }
-<a href=#842 id=842 data-nosnippet>842</a>
-<a href=#843 id=843 data-nosnippet>843</a>    <span class="doccomment">/// Accept one token and update the state of the matcher.
-<a href=#844 id=844 data-nosnippet>844</a>    ///
-<a href=#845 id=845 data-nosnippet>845</a>    /// # Arguments
-<a href=#846 id=846 data-nosnippet>846</a>    /// * `token_id` - The id of the token to accept.
-<a href=#847 id=847 data-nosnippet>847</a>    /// * `debug_print` - If true, print debug information.
-<a href=#848 id=848 data-nosnippet>848</a>    ///
-<a href=#849 id=849 data-nosnippet>849</a>    /// # Returns
-<a href=#850 id=850 data-nosnippet>850</a>    /// * Whether the token is accepted.
-<a href=#851 id=851 data-nosnippet>851</a>    ///
-<a href=#852 id=852 data-nosnippet>852</a>    /// # Note
-<a href=#853 id=853 data-nosnippet>853</a>    /// Termination state.
-<a href=#854 id=854 data-nosnippet>854</a>    ///
-<a href=#855 id=855 data-nosnippet>855</a>    /// When the end of the root rule is reached, the matcher can only accept the stop token.
-<a href=#856 id=856 data-nosnippet>856</a>    /// The matcher is terminated after accepting the stop token, i.e. no AcceptToken or
-<a href=#857 id=857 data-nosnippet>857</a>    /// FindNextTokenMask operations can be performed. The termination state can be canceled
-<a href=#858 id=858 data-nosnippet>858</a>    /// using rollback().
-<a href=#859 id=859 data-nosnippet>859</a>    </span><span class="kw">pub fn </span>accept_token(<span class="kw-2">&amp;mut </span><span class="self">self</span>, token_id: i32, debug_print: <span class="prelude-ty">Option</span>&lt;bool&gt;) -&gt; bool {
-<a href=#860 id=860 data-nosnippet>860</a>        <span class="kw">let </span>debug_print = debug_print.unwrap_or(<span class="bool-val">false</span>);
-<a href=#861 id=861 data-nosnippet>861</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[<span class="self">self </span><span class="kw">as </span><span class="string">"xgrammar::GrammarMatcher*"</span>, token_id <span class="kw">as </span><span class="string">"int32_t"</span>, debug_print <span class="kw">as </span><span class="string">"bool"</span>] -&gt; bool <span class="kw">as </span><span class="string">"bool" </span>{
-<a href=#862 id=862 data-nosnippet>862</a>            <span class="kw">return </span><span class="self">self</span>-&gt;AcceptToken(token_id, debug_print);
-<a href=#863 id=863 data-nosnippet>863</a>        })
-<a href=#864 id=864 data-nosnippet>864</a>    }
-<a href=#865 id=865 data-nosnippet>865</a>
-<a href=#866 id=866 data-nosnippet>866</a>    <span class="doccomment">/// Accept a string and update the state of the matcher. The whole string is considered
-<a href=#867 id=867 data-nosnippet>867</a>    /// as one step in rollback. It is used to complement the functionality of `accept_token()`,
-<a href=#868 id=868 data-nosnippet>868</a>    /// and `accept_token()` should always be used to accept tokens.
-<a href=#869 id=869 data-nosnippet>869</a>    ///
-<a href=#870 id=870 data-nosnippet>870</a>    /// # Arguments
-<a href=#871 id=871 data-nosnippet>871</a>    /// * `input_str` - The string to be accepted.
-<a href=#872 id=872 data-nosnippet>872</a>    /// * `debug_print` - Whether to print information about the internal state of the matcher.
-<a href=#873 id=873 data-nosnippet>873</a>    ///
-<a href=#874 id=874 data-nosnippet>874</a>    /// # Returns
-<a href=#875 id=875 data-nosnippet>875</a>    /// * Whether the string is accepted.
-<a href=#876 id=876 data-nosnippet>876</a>    </span><span class="kw">pub fn </span>accept_string(<span class="kw-2">&amp;mut </span><span class="self">self</span>, input_str: <span class="kw-2">&amp;</span>str, debug_print: <span class="prelude-ty">Option</span>&lt;bool&gt;) -&gt; bool {
-<a href=#877 id=877 data-nosnippet>877</a>        <span class="kw">let </span>debug_print = debug_print.unwrap_or(<span class="bool-val">false</span>);
-<a href=#878 id=878 data-nosnippet>878</a>        <span class="kw">let </span>input_str_cstring =
-<a href=#879 id=879 data-nosnippet>879</a>            CString::new(input_str).expect(<span class="string">"Failed to convert input_str to CString"</span>);
-<a href=#880 id=880 data-nosnippet>880</a>        <span class="kw">let </span>input_str_ptr = input_str_cstring.as_ptr();
+<a href=#803 id=803 data-nosnippet>803</a>    <span class="doccomment">/// Create a GrammarMatcher from a compiled grammar.
+<a href=#804 id=804 data-nosnippet>804</a>    /// # Arguments
+<a href=#805 id=805 data-nosnippet>805</a>    /// * `compiled_grammar` - The compiled grammar to use
+<a href=#806 id=806 data-nosnippet>806</a>    </span><span class="kw">pub fn </span>new(compiled_grammar: <span class="kw-2">&amp;</span>CompiledGrammar) -&gt; <span class="self">Self </span>{
+<a href=#807 id=807 data-nosnippet>807</a>        <span class="self">Self</span>::with(compiled_grammar, <span class="prelude-val">None</span>, <span class="prelude-val">Some</span>(<span class="bool-val">true</span>), <span class="prelude-val">None</span>)
+<a href=#808 id=808 data-nosnippet>808</a>    }
+<a href=#809 id=809 data-nosnippet>809</a>
+<a href=#810 id=810 data-nosnippet>810</a>    <span class="doccomment">/// Create a GrammarMatcher from a compiled grammar.
+<a href=#811 id=811 data-nosnippet>811</a>    /// # Arguments
+<a href=#812 id=812 data-nosnippet>812</a>    /// * `compiled_grammar` - The compiled grammar to use
+<a href=#813 id=813 data-nosnippet>813</a>    /// * `override_stop_tokens` - Optional list of token ids to override the default stop tokens
+<a href=#814 id=814 data-nosnippet>814</a>    /// * `terminate_without_stop_token` - Whether to terminate the matcher without accepting a stop token.
+<a href=#815 id=815 data-nosnippet>815</a>    /// * `max_rollback_tokens` - Deprecated. You don't need to set it and it's always unlimited (-1).
+<a href=#816 id=816 data-nosnippet>816</a>    ///   The new Earley parser significantly reduces the number of states, so we can allow
+<a href=#817 id=817 data-nosnippet>817</a>    ///   unlimited rollback. The maximum number of rollback tokens allowed. The rollback operation
+<a href=#818 id=818 data-nosnippet>818</a>    ///   is useful for jump-forward decoding and speculative decoding.
+<a href=#819 id=819 data-nosnippet>819</a>    </span><span class="kw">pub fn </span>with(
+<a href=#820 id=820 data-nosnippet>820</a>        compiled_grammar: <span class="kw-2">&amp;</span>CompiledGrammar,
+<a href=#821 id=821 data-nosnippet>821</a>        override_stop_tokens: <span class="prelude-ty">Option</span>&lt;<span class="kw-2">&amp;</span>[i32]&gt;,
+<a href=#822 id=822 data-nosnippet>822</a>        terminate_without_stop_token: <span class="prelude-ty">Option</span>&lt;bool&gt;,
+<a href=#823 id=823 data-nosnippet>823</a>        max_rollback_tokens: <span class="prelude-ty">Option</span>&lt;i32&gt;,
+<a href=#824 id=824 data-nosnippet>824</a>    ) -&gt; <span class="self">Self </span>{
+<a href=#825 id=825 data-nosnippet>825</a>        <span class="comment">// Keep it sync with the C++ implementation:
+<a href=#826 id=826 data-nosnippet>826</a>        // https://github.com/mlc-ai/xgrammar/blob/95bdfce011506ea95306b37d080115a2da3e369a/cpp/grammar_matcher.cc#L257
+<a href=#827 id=827 data-nosnippet>827</a>        </span><span class="kw">let </span>terminate_without_stop_token = terminate_without_stop_token.unwrap_or(<span class="bool-val">false</span>);
+<a href=#828 id=828 data-nosnippet>828</a>        <span class="kw">let </span>max_rollback_tokens = max_rollback_tokens.unwrap_or(<span class="number">0</span>);
+<a href=#829 id=829 data-nosnippet>829</a>        <span class="kw">let </span>override_stop_tokens_ptr =
+<a href=#830 id=830 data-nosnippet>830</a>            override_stop_tokens.as_ref().map_or(std::ptr::null(), |v| v.as_ptr());
+<a href=#831 id=831 data-nosnippet>831</a>        <span class="kw">let </span>override_stop_tokens_len = override_stop_tokens.as_ref().map_or(<span class="number">0</span>, |v| v.len());
+<a href=#832 id=832 data-nosnippet>832</a>
+<a href=#833 id=833 data-nosnippet>833</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[
+<a href=#834 id=834 data-nosnippet>834</a>            compiled_grammar <span class="kw">as </span><span class="string">"const xgrammar::CompiledGrammar*"</span>,
+<a href=#835 id=835 data-nosnippet>835</a>            override_stop_tokens_ptr <span class="kw">as </span><span class="string">"const int32_t*"</span>,
+<a href=#836 id=836 data-nosnippet>836</a>            override_stop_tokens_len <span class="kw">as </span><span class="string">"size_t"</span>,
+<a href=#837 id=837 data-nosnippet>837</a>            terminate_without_stop_token <span class="kw">as </span><span class="string">"bool"</span>,
+<a href=#838 id=838 data-nosnippet>838</a>            max_rollback_tokens <span class="kw">as </span><span class="string">"int"
+<a href=#839 id=839 data-nosnippet>839</a>        </span>] -&gt; GrammarMatcher <span class="kw">as </span><span class="string">"xgrammar::GrammarMatcher" </span>{
+<a href=#840 id=840 data-nosnippet>840</a>            std::optional&lt;std::vector&lt;int32_t&gt;&gt; opt_override_stop_tokens;
+<a href=#841 id=841 data-nosnippet>841</a>            <span class="kw">if </span>(override_stop_tokens_len &gt; <span class="number">0</span>) {
+<a href=#842 id=842 data-nosnippet>842</a>                opt_override_stop_tokens = std::vector&lt;int32_t&gt;(
+<a href=#843 id=843 data-nosnippet>843</a>                    <span class="kw-2">*</span>override_stop_tokens_ptr,
+<a href=#844 id=844 data-nosnippet>844</a>                    <span class="kw-2">*</span>override_stop_tokens_ptr + override_stop_tokens_len
+<a href=#845 id=845 data-nosnippet>845</a>                );
+<a href=#846 id=846 data-nosnippet>846</a>            } <span class="kw">else </span>{
+<a href=#847 id=847 data-nosnippet>847</a>                opt_override_stop_tokens = std::nullopt;
+<a href=#848 id=848 data-nosnippet>848</a>            }
+<a href=#849 id=849 data-nosnippet>849</a>
+<a href=#850 id=850 data-nosnippet>850</a>            <span class="kw">return </span>xgrammar::GrammarMatcher(
+<a href=#851 id=851 data-nosnippet>851</a>                <span class="kw-2">*</span>compiled_grammar,
+<a href=#852 id=852 data-nosnippet>852</a>                opt_override_stop_tokens,
+<a href=#853 id=853 data-nosnippet>853</a>                terminate_without_stop_token,
+<a href=#854 id=854 data-nosnippet>854</a>                max_rollback_tokens
+<a href=#855 id=855 data-nosnippet>855</a>            );
+<a href=#856 id=856 data-nosnippet>856</a>        })
+<a href=#857 id=857 data-nosnippet>857</a>    }
+<a href=#858 id=858 data-nosnippet>858</a>
+<a href=#859 id=859 data-nosnippet>859</a>    <span class="doccomment">/// Accept one token and update the state of the matcher.
+<a href=#860 id=860 data-nosnippet>860</a>    ///
+<a href=#861 id=861 data-nosnippet>861</a>    /// # Arguments
+<a href=#862 id=862 data-nosnippet>862</a>    /// * `token_id` - The id of the token to accept.
+<a href=#863 id=863 data-nosnippet>863</a>    /// * `debug_print` - If true, print debug information.
+<a href=#864 id=864 data-nosnippet>864</a>    ///
+<a href=#865 id=865 data-nosnippet>865</a>    /// # Returns
+<a href=#866 id=866 data-nosnippet>866</a>    /// * Whether the token is accepted.
+<a href=#867 id=867 data-nosnippet>867</a>    ///
+<a href=#868 id=868 data-nosnippet>868</a>    /// # Note
+<a href=#869 id=869 data-nosnippet>869</a>    /// Termination state.
+<a href=#870 id=870 data-nosnippet>870</a>    ///
+<a href=#871 id=871 data-nosnippet>871</a>    /// When the end of the root rule is reached, the matcher can only accept the stop token.
+<a href=#872 id=872 data-nosnippet>872</a>    /// The matcher is terminated after accepting the stop token, i.e. no AcceptToken or
+<a href=#873 id=873 data-nosnippet>873</a>    /// FindNextTokenMask operations can be performed. The termination state can be canceled
+<a href=#874 id=874 data-nosnippet>874</a>    /// using rollback().
+<a href=#875 id=875 data-nosnippet>875</a>    </span><span class="kw">pub fn </span>accept_token(<span class="kw-2">&amp;mut </span><span class="self">self</span>, token_id: i32, debug_print: <span class="prelude-ty">Option</span>&lt;bool&gt;) -&gt; bool {
+<a href=#876 id=876 data-nosnippet>876</a>        <span class="kw">let </span>debug_print = debug_print.unwrap_or(<span class="bool-val">false</span>);
+<a href=#877 id=877 data-nosnippet>877</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[<span class="self">self </span><span class="kw">as </span><span class="string">"xgrammar::GrammarMatcher*"</span>, token_id <span class="kw">as </span><span class="string">"int32_t"</span>, debug_print <span class="kw">as </span><span class="string">"bool"</span>] -&gt; bool <span class="kw">as </span><span class="string">"bool" </span>{
+<a href=#878 id=878 data-nosnippet>878</a>            <span class="kw">return </span><span class="self">self</span>-&gt;AcceptToken(token_id, debug_print);
+<a href=#879 id=879 data-nosnippet>879</a>        })
+<a href=#880 id=880 data-nosnippet>880</a>    }
 <a href=#881 id=881 data-nosnippet>881</a>
-<a href=#882 id=882 data-nosnippet>882</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[<span class="self">self </span><span class="kw">as </span><span class="string">"xgrammar::GrammarMatcher*"</span>, input_str_ptr <span class="kw">as </span><span class="string">"const char*"</span>, debug_print <span class="kw">as </span><span class="string">"bool"</span>] -&gt; bool <span class="kw">as </span><span class="string">"bool" </span>{
-<a href=#883 id=883 data-nosnippet>883</a>            <span class="kw">return </span><span class="self">self</span>-&gt;AcceptString(input_str_ptr, debug_print);
-<a href=#884 id=884 data-nosnippet>884</a>        })
-<a href=#885 id=885 data-nosnippet>885</a>    }
-<a href=#886 id=886 data-nosnippet>886</a>
-<a href=#887 id=887 data-nosnippet>887</a>    <span class="doccomment">/// Get the set of tokens that are acceptable for the next step and store them in a bitmask.
-<a href=#888 id=888 data-nosnippet>888</a>    ///
-<a href=#889 id=889 data-nosnippet>889</a>    /// # Arguments
-<a href=#890 id=890 data-nosnippet>890</a>    /// * `next_token_bitmask` - The bitmask to store the result. The bitmask must be pre-allocated
-<a href=#891 id=891 data-nosnippet>891</a>    ///   and with shape (GetBitmaskSize(),) and dtype int32.
-<a href=#892 id=892 data-nosnippet>892</a>    /// * `index` - The index of the bitmask to fill. If None, the first bitmask is filled.
-<a href=#893 id=893 data-nosnippet>893</a>    /// * `debug_print` - If true, print debug information.
-<a href=#894 id=894 data-nosnippet>894</a>    ///
-<a href=#895 id=895 data-nosnippet>895</a>    /// # Returns
-<a href=#896 id=896 data-nosnippet>896</a>    /// * Whether the bitmask need to be applied (not all-true).
-<a href=#897 id=897 data-nosnippet>897</a>    </span><span class="kw">pub fn </span>fill_next_token_bitmask(
-<a href=#898 id=898 data-nosnippet>898</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
-<a href=#899 id=899 data-nosnippet>899</a>        next_token_bitmask: <span class="kw-2">&amp;mut </span>DLTensor,
-<a href=#900 id=900 data-nosnippet>900</a>        index: <span class="prelude-ty">Option</span>&lt;usize&gt;,
-<a href=#901 id=901 data-nosnippet>901</a>        debug_print: <span class="prelude-ty">Option</span>&lt;bool&gt;,
-<a href=#902 id=902 data-nosnippet>902</a>    ) -&gt; bool {
-<a href=#903 id=903 data-nosnippet>903</a>        <span class="kw">let </span>dl_tensor = next_token_bitmask.dl_tensor();
-<a href=#904 id=904 data-nosnippet>904</a>        <span class="kw">let </span>index = index.unwrap_or(<span class="number">0</span>) <span class="kw">as </span>i32;
-<a href=#905 id=905 data-nosnippet>905</a>        <span class="kw">let </span>debug_print = debug_print.unwrap_or(<span class="bool-val">false</span>);
-<a href=#906 id=906 data-nosnippet>906</a>
-<a href=#907 id=907 data-nosnippet>907</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[<span class="self">self </span><span class="kw">as </span><span class="string">"xgrammar::GrammarMatcher*"</span>, dl_tensor <span class="kw">as </span><span class="string">"DLTensor*"</span>, index <span class="kw">as </span><span class="string">"int32_t"</span>, debug_print <span class="kw">as </span><span class="string">"bool"</span>] -&gt; bool <span class="kw">as </span><span class="string">"bool" </span>{
-<a href=#908 id=908 data-nosnippet>908</a>            <span class="kw">return </span><span class="self">self</span>-&gt;FillNextTokenBitmask(dl_tensor, index, debug_print);
-<a href=#909 id=909 data-nosnippet>909</a>        })
-<a href=#910 id=910 data-nosnippet>910</a>    }
-<a href=#911 id=911 data-nosnippet>911</a>
-<a href=#912 id=912 data-nosnippet>912</a>    <span class="doccomment">/// Rollback the matcher to a previous state.
-<a href=#913 id=913 data-nosnippet>913</a>    ///
-<a href=#914 id=914 data-nosnippet>914</a>    /// # Arguments
-<a href=#915 id=915 data-nosnippet>915</a>    /// * `num_tokens` - The number of tokens to rollback. It cannot exceed the current number of
-<a href=#916 id=916 data-nosnippet>916</a>    ///   steps, nor can it exceed the specified maximum number of rollback tokens.
-<a href=#917 id=917 data-nosnippet>917</a>    </span><span class="kw">pub fn </span>rollback(<span class="kw-2">&amp;mut </span><span class="self">self</span>, num_tokens: <span class="prelude-ty">Option</span>&lt;i32&gt;) {
-<a href=#918 id=918 data-nosnippet>918</a>        <span class="kw">let </span>num_tokens = num_tokens.unwrap_or(<span class="number">1</span>);
-<a href=#919 id=919 data-nosnippet>919</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[<span class="self">self </span><span class="kw">as </span><span class="string">"xgrammar::GrammarMatcher*"</span>, num_tokens <span class="kw">as </span><span class="string">"int"</span>] {
-<a href=#920 id=920 data-nosnippet>920</a>            <span class="self">self</span>-&gt;Rollback(num_tokens);
-<a href=#921 id=921 data-nosnippet>921</a>        })
-<a href=#922 id=922 data-nosnippet>922</a>    }
-<a href=#923 id=923 data-nosnippet>923</a>
-<a href=#924 id=924 data-nosnippet>924</a>    <span class="doccomment">/// Check if the matcher has accepted the stop token and terminated.
-<a href=#925 id=925 data-nosnippet>925</a>    </span><span class="kw">pub fn </span>is_terminated(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
-<a href=#926 id=926 data-nosnippet>926</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[<span class="self">self </span><span class="kw">as </span><span class="string">"const xgrammar::GrammarMatcher*"</span>] -&gt; bool <span class="kw">as </span><span class="string">"bool" </span>{
-<a href=#927 id=927 data-nosnippet>927</a>            <span class="kw">return </span><span class="self">self</span>-&gt;IsTerminated();
-<a href=#928 id=928 data-nosnippet>928</a>        })
-<a href=#929 id=929 data-nosnippet>929</a>    }
-<a href=#930 id=930 data-nosnippet>930</a>
-<a href=#931 id=931 data-nosnippet>931</a>    <span class="doccomment">/// Get the maximum number of rollback tokens allowed.
-<a href=#932 id=932 data-nosnippet>932</a>    </span><span class="kw">pub fn </span>get_max_rollback_tokens(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; i32 {
-<a href=#933 id=933 data-nosnippet>933</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[<span class="self">self </span><span class="kw">as </span><span class="string">"const xgrammar::GrammarMatcher*"</span>] -&gt; i32 <span class="kw">as </span><span class="string">"int" </span>{
-<a href=#934 id=934 data-nosnippet>934</a>            <span class="kw">return </span><span class="self">self</span>-&gt;GetMaxRollbackTokens();
-<a href=#935 id=935 data-nosnippet>935</a>        })
-<a href=#936 id=936 data-nosnippet>936</a>    }
-<a href=#937 id=937 data-nosnippet>937</a>
-<a href=#938 id=938 data-nosnippet>938</a>    <span class="kw">pub fn </span>get_stop_token_ids(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;i32&gt; {
-<a href=#939 id=939 data-nosnippet>939</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[<span class="self">self </span><span class="kw">as </span><span class="string">"const xgrammar::GrammarMatcher*"</span>] -&gt; Vec&lt;i32&gt; <span class="kw">as </span><span class="string">"std::vector&lt;int&gt;" </span>{
-<a href=#940 id=940 data-nosnippet>940</a>            <span class="kw">return </span><span class="self">self</span>-&gt;GetStopTokenIds();
-<a href=#941 id=941 data-nosnippet>941</a>        })
-<a href=#942 id=942 data-nosnippet>942</a>    }
-<a href=#943 id=943 data-nosnippet>943</a>
-<a href=#944 id=944 data-nosnippet>944</a>    <span class="doccomment">/// Reset the matcher to the initial state.
-<a href=#945 id=945 data-nosnippet>945</a>    </span><span class="kw">pub fn </span>reset(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
-<a href=#946 id=946 data-nosnippet>946</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[<span class="self">self </span><span class="kw">as </span><span class="string">"xgrammar::GrammarMatcher*"</span>] {
-<a href=#947 id=947 data-nosnippet>947</a>            <span class="self">self</span>-&gt;Reset();
-<a href=#948 id=948 data-nosnippet>948</a>        })
-<a href=#949 id=949 data-nosnippet>949</a>    }
-<a href=#950 id=950 data-nosnippet>950</a>}</code></pre></div></section></main></body></html>
+<a href=#882 id=882 data-nosnippet>882</a>    <span class="doccomment">/// Accept a string and update the state of the matcher. The whole string is considered
+<a href=#883 id=883 data-nosnippet>883</a>    /// as one step in rollback. It is used to complement the functionality of `accept_token()`,
+<a href=#884 id=884 data-nosnippet>884</a>    /// and `accept_token()` should always be used to accept tokens.
+<a href=#885 id=885 data-nosnippet>885</a>    ///
+<a href=#886 id=886 data-nosnippet>886</a>    /// # Arguments
+<a href=#887 id=887 data-nosnippet>887</a>    /// * `input_str` - The string to be accepted.
+<a href=#888 id=888 data-nosnippet>888</a>    /// * `debug_print` - Whether to print information about the internal state of the matcher.
+<a href=#889 id=889 data-nosnippet>889</a>    ///
+<a href=#890 id=890 data-nosnippet>890</a>    /// # Returns
+<a href=#891 id=891 data-nosnippet>891</a>    /// * Whether the string is accepted.
+<a href=#892 id=892 data-nosnippet>892</a>    </span><span class="kw">pub fn </span>accept_string(<span class="kw-2">&amp;mut </span><span class="self">self</span>, input_str: <span class="kw-2">&amp;</span>str, debug_print: <span class="prelude-ty">Option</span>&lt;bool&gt;) -&gt; bool {
+<a href=#893 id=893 data-nosnippet>893</a>        <span class="kw">let </span>debug_print = debug_print.unwrap_or(<span class="bool-val">false</span>);
+<a href=#894 id=894 data-nosnippet>894</a>        <span class="kw">let </span>input_str_cstring =
+<a href=#895 id=895 data-nosnippet>895</a>            CString::new(input_str).expect(<span class="string">"Failed to convert input_str to CString"</span>);
+<a href=#896 id=896 data-nosnippet>896</a>        <span class="kw">let </span>input_str_ptr = input_str_cstring.as_ptr();
+<a href=#897 id=897 data-nosnippet>897</a>
+<a href=#898 id=898 data-nosnippet>898</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[<span class="self">self </span><span class="kw">as </span><span class="string">"xgrammar::GrammarMatcher*"</span>, input_str_ptr <span class="kw">as </span><span class="string">"const char*"</span>, debug_print <span class="kw">as </span><span class="string">"bool"</span>] -&gt; bool <span class="kw">as </span><span class="string">"bool" </span>{
+<a href=#899 id=899 data-nosnippet>899</a>            <span class="kw">return </span><span class="self">self</span>-&gt;AcceptString(input_str_ptr, debug_print);
+<a href=#900 id=900 data-nosnippet>900</a>        })
+<a href=#901 id=901 data-nosnippet>901</a>    }
+<a href=#902 id=902 data-nosnippet>902</a>
+<a href=#903 id=903 data-nosnippet>903</a>    <span class="doccomment">/// Get the set of tokens that are acceptable for the next step and store them in a bitmask.
+<a href=#904 id=904 data-nosnippet>904</a>    ///
+<a href=#905 id=905 data-nosnippet>905</a>    /// # Arguments
+<a href=#906 id=906 data-nosnippet>906</a>    /// * `next_token_bitmask` - The bitmask to store the result. The bitmask must be pre-allocated
+<a href=#907 id=907 data-nosnippet>907</a>    ///   a DLTensor with shape (tokenizer.GetVocabSize() + 31) / 32, and dtype int32.
+<a href=#908 id=908 data-nosnippet>908</a>    /// * `index` - The index of the bitmask to fill. If None, the first bitmask is filled.
+<a href=#909 id=909 data-nosnippet>909</a>    /// * `debug_print` - If true, print debug information.
+<a href=#910 id=910 data-nosnippet>910</a>    ///
+<a href=#911 id=911 data-nosnippet>911</a>    /// # Returns
+<a href=#912 id=912 data-nosnippet>912</a>    /// * Whether the bitmask need to be applied (not all-true).
+<a href=#913 id=913 data-nosnippet>913</a>    </span><span class="kw">pub fn </span>fill_next_token_bitmask(
+<a href=#914 id=914 data-nosnippet>914</a>        <span class="kw-2">&amp;mut </span><span class="self">self</span>,
+<a href=#915 id=915 data-nosnippet>915</a>        next_token_bitmask: <span class="kw-2">&amp;mut </span>DLTensor,
+<a href=#916 id=916 data-nosnippet>916</a>        index: <span class="prelude-ty">Option</span>&lt;usize&gt;,
+<a href=#917 id=917 data-nosnippet>917</a>        debug_print: <span class="prelude-ty">Option</span>&lt;bool&gt;,
+<a href=#918 id=918 data-nosnippet>918</a>    ) -&gt; bool {
+<a href=#919 id=919 data-nosnippet>919</a>        <span class="kw">let </span>dl_tensor = next_token_bitmask.dl_tensor();
+<a href=#920 id=920 data-nosnippet>920</a>        <span class="kw">let </span>index = index.unwrap_or(<span class="number">0</span>) <span class="kw">as </span>i32;
+<a href=#921 id=921 data-nosnippet>921</a>        <span class="kw">let </span>debug_print = debug_print.unwrap_or(<span class="bool-val">false</span>);
+<a href=#922 id=922 data-nosnippet>922</a>
+<a href=#923 id=923 data-nosnippet>923</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[<span class="self">self </span><span class="kw">as </span><span class="string">"xgrammar::GrammarMatcher*"</span>, dl_tensor <span class="kw">as </span><span class="string">"DLTensor*"</span>, index <span class="kw">as </span><span class="string">"int32_t"</span>, debug_print <span class="kw">as </span><span class="string">"bool"</span>] -&gt; bool <span class="kw">as </span><span class="string">"bool" </span>{
+<a href=#924 id=924 data-nosnippet>924</a>            <span class="kw">return </span><span class="self">self</span>-&gt;FillNextTokenBitmask(dl_tensor, index, debug_print);
+<a href=#925 id=925 data-nosnippet>925</a>        })
+<a href=#926 id=926 data-nosnippet>926</a>    }
+<a href=#927 id=927 data-nosnippet>927</a>
+<a href=#928 id=928 data-nosnippet>928</a>    <span class="doccomment">/// Rollback the matcher to a previous state.
+<a href=#929 id=929 data-nosnippet>929</a>    ///
+<a href=#930 id=930 data-nosnippet>930</a>    /// # Arguments
+<a href=#931 id=931 data-nosnippet>931</a>    /// * `num_tokens` - The number of tokens to rollback. It cannot exceed the current number of
+<a href=#932 id=932 data-nosnippet>932</a>    ///   steps, nor can it exceed the specified maximum number of rollback tokens.
+<a href=#933 id=933 data-nosnippet>933</a>    </span><span class="kw">pub fn </span>rollback(<span class="kw-2">&amp;mut </span><span class="self">self</span>, num_tokens: <span class="prelude-ty">Option</span>&lt;i32&gt;) {
+<a href=#934 id=934 data-nosnippet>934</a>        <span class="kw">let </span>num_tokens = num_tokens.unwrap_or(<span class="number">1</span>);
+<a href=#935 id=935 data-nosnippet>935</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[<span class="self">self </span><span class="kw">as </span><span class="string">"xgrammar::GrammarMatcher*"</span>, num_tokens <span class="kw">as </span><span class="string">"int"</span>] {
+<a href=#936 id=936 data-nosnippet>936</a>            <span class="self">self</span>-&gt;Rollback(num_tokens);
+<a href=#937 id=937 data-nosnippet>937</a>        })
+<a href=#938 id=938 data-nosnippet>938</a>    }
+<a href=#939 id=939 data-nosnippet>939</a>
+<a href=#940 id=940 data-nosnippet>940</a>    <span class="doccomment">/// Check if the matcher has accepted the stop token and terminated.
+<a href=#941 id=941 data-nosnippet>941</a>    </span><span class="kw">pub fn </span>is_terminated(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; bool {
+<a href=#942 id=942 data-nosnippet>942</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[<span class="self">self </span><span class="kw">as </span><span class="string">"const xgrammar::GrammarMatcher*"</span>] -&gt; bool <span class="kw">as </span><span class="string">"bool" </span>{
+<a href=#943 id=943 data-nosnippet>943</a>            <span class="kw">return </span><span class="self">self</span>-&gt;IsTerminated();
+<a href=#944 id=944 data-nosnippet>944</a>        })
+<a href=#945 id=945 data-nosnippet>945</a>    }
+<a href=#946 id=946 data-nosnippet>946</a>
+<a href=#947 id=947 data-nosnippet>947</a>    <span class="doccomment">/// Get the maximum number of rollback tokens allowed.
+<a href=#948 id=948 data-nosnippet>948</a>    </span><span class="kw">pub fn </span>get_max_rollback_tokens(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; i32 {
+<a href=#949 id=949 data-nosnippet>949</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[<span class="self">self </span><span class="kw">as </span><span class="string">"const xgrammar::GrammarMatcher*"</span>] -&gt; i32 <span class="kw">as </span><span class="string">"int" </span>{
+<a href=#950 id=950 data-nosnippet>950</a>            <span class="kw">return </span><span class="self">self</span>-&gt;GetMaxRollbackTokens();
+<a href=#951 id=951 data-nosnippet>951</a>        })
+<a href=#952 id=952 data-nosnippet>952</a>    }
+<a href=#953 id=953 data-nosnippet>953</a>
+<a href=#954 id=954 data-nosnippet>954</a>    <span class="kw">pub fn </span>get_stop_token_ids(<span class="kw-2">&amp;</span><span class="self">self</span>) -&gt; Vec&lt;i32&gt; {
+<a href=#955 id=955 data-nosnippet>955</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[<span class="self">self </span><span class="kw">as </span><span class="string">"const xgrammar::GrammarMatcher*"</span>] -&gt; Vec&lt;i32&gt; <span class="kw">as </span><span class="string">"std::vector&lt;int&gt;" </span>{
+<a href=#956 id=956 data-nosnippet>956</a>            <span class="kw">return </span><span class="self">self</span>-&gt;GetStopTokenIds();
+<a href=#957 id=957 data-nosnippet>957</a>        })
+<a href=#958 id=958 data-nosnippet>958</a>    }
+<a href=#959 id=959 data-nosnippet>959</a>
+<a href=#960 id=960 data-nosnippet>960</a>    <span class="doccomment">/// Reset the matcher to the initial state.
+<a href=#961 id=961 data-nosnippet>961</a>    </span><span class="kw">pub fn </span>reset(<span class="kw-2">&amp;mut </span><span class="self">self</span>) {
+<a href=#962 id=962 data-nosnippet>962</a>        <span class="macro">cpp!</span>(<span class="kw">unsafe </span>[<span class="self">self </span><span class="kw">as </span><span class="string">"xgrammar::GrammarMatcher*"</span>] {
+<a href=#963 id=963 data-nosnippet>963</a>            <span class="self">self</span>-&gt;Reset();
+<a href=#964 id=964 data-nosnippet>964</a>        })
+<a href=#965 id=965 data-nosnippet>965</a>    }
+<a href=#966 id=966 data-nosnippet>966</a>}</code></pre></div></section></main></body></html>
