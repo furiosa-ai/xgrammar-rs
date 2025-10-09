@@ -800,9 +800,25 @@ impl Grammar {
 }
 
 impl GrammarMatcher {
+    /// Create a GrammarMatcher from a compiled grammar.
+    /// # Arguments
+    /// * `compiled_grammar` - The compiled grammar to use
+    pub fn new(compiled_grammar: &CompiledGrammar) -> Self {
+        Self::with(compiled_grammar, None, Some(true), None)
+    }
+
+    /// Create a GrammarMatcher from a compiled grammar.
+    /// # Arguments
+    /// * `compiled_grammar` - The compiled grammar to use
+    /// * `override_stop_tokens` - Optional list of token ids to override the default stop tokens
+    /// * `terminate_without_stop_token` - Whether to terminate the matcher without accepting a stop token.
+    /// * `max_rollback_tokens` - Deprecated. You don't need to set it and it's always unlimited (-1).
+    ///        The new Earley parser significantly reduces the number of states, so we can allow
+    ///        unlimited rollback. The maximum number of rollback tokens allowed. The rollback operation
+    ///        is useful for jump-forward decoding and speculative decoding.
     pub fn with(
         compiled_grammar: &CompiledGrammar,
-        override_stop_tokens: Option<Vec<i32>>,
+        override_stop_tokens: Option<&[i32]>,
         terminate_without_stop_token: Option<bool>,
         max_rollback_tokens: Option<i32>,
     ) -> Self {
