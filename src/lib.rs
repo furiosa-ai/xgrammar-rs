@@ -492,7 +492,7 @@ impl GrammarCompiler {
 
     /// Clear the internal cache of compiled grammars.
     /// This frees up memory used by cached compiled grammars.
-    pub fn clear_cache(&mut self) {
+    pub fn clear_cache(&self) {
         cpp!(unsafe [self as "xgrammar::GrammarCompiler*"] {
             self->ClearCache();
         })
@@ -813,9 +813,9 @@ impl GrammarMatcher {
     /// * `override_stop_tokens` - Optional list of token ids to override the default stop tokens
     /// * `terminate_without_stop_token` - Whether to terminate the matcher without accepting a stop token.
     /// * `max_rollback_tokens` - Deprecated. You don't need to set it and it's always unlimited (-1).
-    ///        The new Earley parser significantly reduces the number of states, so we can allow
-    ///        unlimited rollback. The maximum number of rollback tokens allowed. The rollback operation
-    ///        is useful for jump-forward decoding and speculative decoding.
+    ///   The new Earley parser significantly reduces the number of states, so we can allow
+    ///   unlimited rollback. The maximum number of rollback tokens allowed. The rollback operation
+    ///   is useful for jump-forward decoding and speculative decoding.
     pub fn with(
         compiled_grammar: &CompiledGrammar,
         override_stop_tokens: Option<&[i32]>,
@@ -904,7 +904,7 @@ impl GrammarMatcher {
     ///
     /// # Arguments
     /// * `next_token_bitmask` - The bitmask to store the result. The bitmask must be pre-allocated
-    ///    a DLTensor with shape (tokenizer.GetVocabSize() + 31) / 32, and dtype int32.
+    ///   a DLTensor with shape (tokenizer.GetVocabSize() + 31) / 32, and dtype int32.
     /// * `index` - The index of the bitmask to fill. If None, the first bitmask is filled.
     /// * `debug_print` - If true, print debug information.
     ///

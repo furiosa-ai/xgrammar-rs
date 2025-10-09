@@ -50,8 +50,7 @@ fn do_test_grammar_compiler_json_test(max_threads: usize) {
             .expect("Failed to load tokenizer info");
 
     let time_start = Instant::now();
-    let mut grammar_compiler =
-        GrammarCompiler::with(&tokenizer_info, Some(max_threads), None, None);
+    let grammar_compiler = GrammarCompiler::with(&tokenizer_info, Some(max_threads), None, None);
     let time_end = Instant::now();
     println!("Time to init cached grammar compiler: {:?}", time_end.duration_since(time_start));
 
@@ -105,7 +104,7 @@ fn test_matcher_accept_string_and_bitmask() {
     let tokenizer_info =
         TokenizerInfo::from_pretrained(GPT_OSS_20B_PRETRAINED_ID, None, None, None)
             .expect("Failed to load tokenizer info");
-    let mut compiler = GrammarCompiler::new(&tokenizer_info);
+    let compiler = GrammarCompiler::new(&tokenizer_info);
     let compiled_grammar = compiler.compile_builtin_json_grammar();
     let mut matcher = GrammarMatcher::with(&compiled_grammar, None, Some(true), None);
 

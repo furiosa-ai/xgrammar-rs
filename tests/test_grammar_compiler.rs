@@ -187,7 +187,7 @@ fn test_compile_structural_tag() {
 fn test_compile_structural_tag_complex() {
     let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
         .expect("Failed to load tokenizer info");
-    let mut compiler = GrammarCompiler::new(&tok_info);
+    let compiler = GrammarCompiler::new(&tok_info);
 
     // Test with more complex structural tags
     let tags = vec![
