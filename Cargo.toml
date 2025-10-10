@@ -13,11 +13,11 @@ auto-init = []
 cpp = "0.5.10"
 dlpark = { version = "0.6.0", features = ["ndarray"] }
 globset = "0.4.16"
-hf-hub = { version = "0.4.3", optional = true }
+hf-hub = { version = "0.4.3", default-features = false, features = ["ureq"], optional = true }
 serde_json = "1"
 tempfile = "3.20.0"
 thiserror = "2"
-tokenizers = { version = "0.21.2", features = ["http"] }
+tokenizers = { version = "0.21.2" }
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
 

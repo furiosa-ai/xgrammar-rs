@@ -1,7 +1,11 @@
 mod common;
 
+use hf_hub::Repo;
 use tokenizers::Tokenizer;
-use xgrammar::{FromPretrainedParameters, TokenizerInfo, VocabType};
+use xgrammar::{
+    TOKENIZER_ALLOW_PATTERN, TokenizerInfo, VocabType,
+    huggingface_hub::{self, Params, compile_glob_pattern},
+};
 
 // Shared test cases (tokenizer_id, expected_vocab_type, expected_add_prefix_space)
 const TEST_TOKENIZER_CASES: &[(&str, VocabType, bool)] = &[
@@ -51,14 +55,20 @@ fn assert_metadata(
 /// Test to verify vocab type and add_prefix_space from tokenizer metadata
 #[test]
 fn test_tokenizer_info() {
-    let param = std::env::var("HF_TOKEN")
-        .map(|token| FromPretrainedParameters { token: Some(token), ..Default::default() })
-        .unwrap_or_default();
-
     for &(tokenizer_id, vocab_type, add_prefix_space) in TEST_TOKENIZER_CASES {
         tracing::info!("Testing tokenizer: {}", tokenizer_id);
-        let tokenizer = Tokenizer::from_pretrained(tokenizer_id, Some(param.clone()))
-            .expect("Failed to load tokenizer");
+
+        let allow_patterns = compile_glob_pattern(TOKENIZER_ALLOW_PATTERN).unwrap();
+        let download_options =
+            Some(Params { allow_patterns: Some(allow_patterns), ..Default::default() });
+
+        let path = huggingface_hub::snapshot_download(
+            Repo::model(tokenizer_id.to_string()),
+            download_options,
+        )
+        .unwrap();
+        let tokenizer = Tokenizer::from_file(path.join("tokenizer.json").to_str().unwrap())
+            .expect("Failed to load tokenizer from file");
 
         let tokenizer_info = TokenizerInfo::from_pretrained(tokenizer_id, None, None, None)
             .expect("Failed to get tokenizer info");

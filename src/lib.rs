@@ -12,7 +12,6 @@ use dlpark::{traits::TensorView, versioned::SafeManagedTensorVersioned as DLTens
 use error::XGrammarErr;
 use serde_json::Value;
 pub use tokenizers;
-pub use tokenizers::FromPretrainedParameters;
 
 type Result<T> = std::result::Result<T, XGrammarErr>;
 
@@ -88,7 +87,8 @@ pub static HF_CONFIG_FILE: &str = "config.json";
 pub static TOKENIZER_FILE: &str = "tokenizer.json";
 pub static TOKENIZER_CONFIG_FILE: &str = "tokenizer_config.json";
 pub static GENERATION_CONFIG_FILE: &str = "generation_config.json";
-pub static TOKENIZER_ALLOW_PATTERN: &[&str] = &[TOKENIZER_FILE, TOKENIZER_CONFIG_FILE];
+pub static TOKENIZER_ALLOW_PATTERN: &[&str] =
+    &[TOKENIZER_FILE, TOKENIZER_CONFIG_FILE, GENERATION_CONFIG_FILE];
 
 pub static TOKENIZER_MODEL_KEY: &str = "model";
 pub static TOKENIZER_VOCAB_KEY: &str = "vocab";
