@@ -1,5 +1,7 @@
 # xgrammar-rs
 
+[![CI](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/ci.yml) [![Deploy Docs](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/docs.yml/badge.svg)](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/docs.yml)
+
 This project provides safe and idiomatic Rust bindings for the `xgrammar` C++ library.
 By wrapping the C++ implementation, this crate leverages Rust's memory safety
 andguarantees while providing access to `xgrammar`'s high-performance and features
