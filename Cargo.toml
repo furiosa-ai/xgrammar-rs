@@ -4,9 +4,7 @@ version = "0.1.0"
 authors = ["Hyunsik Choi <hyunsik@furiosa.ai>"]
 edition = "2024"
 
-exclude = [
-    "thirdparty/*",
-]
+exclude = ["thirdparty/*"]
 
 [features]
 default = ["hf_hub"]
