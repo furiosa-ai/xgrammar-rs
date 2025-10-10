@@ -2,7 +2,11 @@
 name = "xgrammar"
 version = "0.1.0"
 authors = ["Hyunsik Choi <hyunsik@furiosa.ai>"]
-edition = "2021"
+edition = "2024"
+
+exclude = [
+    "thirdparty/*",
+]
 
 [features]
 default = ["hf_hub"]
