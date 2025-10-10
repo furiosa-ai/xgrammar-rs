@@ -21,7 +21,7 @@ const TEST_TOKENIZER_CASES: &[(&str, VocabType, bool)] = &[
     ("microsoft/Phi-3-mini-4k-instruct", VocabType::ByteFallback, true),
     ("microsoft/Phi-3.5-mini-instruct", VocabType::ByteFallback, true),
     ("Qwen/Qwen1.5-4B-Chat", VocabType::ByteLevel, false),
-    ("Qwen/Qwen2-7B-Instruct", VocabType::ByteLevel, false),
+    // ("Qwen/Qwen2-7B-Instruct", VocabType::ByteLevel, false), // no tokenizer.json
     // ("microsoft/Phi-3-small-8k-instruct", VocabType::Raw, false), // no tokenizer.json
     // ("Qwen/Qwen-7B-Chat", VocabType::Raw, false), // no tokenizer.json
     ("meta-llama/Llama-3.2-1B", VocabType::ByteLevel, false),

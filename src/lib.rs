@@ -1,7 +1,6 @@
 mod error;
 #[cfg(feature = "hf_hub")]
 pub mod huggingface_hub;
-mod utils;
 
 use std::collections::HashMap;
 use std::ffi::CString;
@@ -14,8 +13,6 @@ use error::XGrammarErr;
 use serde_json::Value;
 pub use tokenizers;
 pub use tokenizers::FromPretrainedParameters;
-
-use crate::utils::get_json_field;
 
 type Result<T> = std::result::Result<T, XGrammarErr>;
 
@@ -87,13 +84,15 @@ pub struct MetadataFromHF {
     pub add_prefix_space: bool,
 }
 
+pub static HF_CONFIG_FILE: &str = "config.json";
 pub static TOKENIZER_FILE: &str = "tokenizer.json";
 pub static TOKENIZER_CONFIG_FILE: &str = "tokenizer_config.json";
+pub static GENERATION_CONFIG_FILE: &str = "generation_config.json";
 pub static TOKENIZER_ALLOW_PATTERN: &[&str] = &[TOKENIZER_FILE, TOKENIZER_CONFIG_FILE];
 
 pub static TOKENIZER_MODEL_KEY: &str = "model";
 pub static TOKENIZER_VOCAB_KEY: &str = "vocab";
-pub static HF_CONFIG_EOS_TOKEN_ID_KEY: &str = "eos_token_id";
+pub static EOS_TOKEN_ID_KEY: &str = "eos_token_id";
 
 impl TokenizerInfo {
     pub fn from_backend_str(
@@ -127,16 +126,30 @@ impl TokenizerInfo {
         Self::new(vocab_map, vocab_type, final_vocab_size, stop_token_ids, add_prefix_space)
     }
 
-    #[cfg(feature = "hf_hub")]
-    fn get_config(path: &Path) -> self::Result<Value> {
-        let config_path = path.join("config.json");
-        let content =
-            std::fs::read_to_string(&config_path).map_err(XGrammarErr::TokenizerLoadFailed)?;
-        let config: Value = serde_json::from_str(&content)?;
-        Ok(config)
+    pub fn parse_eos_token(path: &Path, json_key: &str) -> Option<Vec<i32>> {
+        let contents = std::fs::read_to_string(path).ok()?;
+        let json: Value = serde_json::from_str(&contents).ok()?;
+        match json.get(json_key) {
+            Some(Value::Number(num)) if num.is_i64() => Some(vec![num.as_i64().unwrap() as i32]),
+            Some(Value::Array(arr)) => {
+                let mut eos_tokens = Vec::new();
+                for item in arr {
+                    if let Value::Number(num) = item {
+                        if num.is_i64() {
+                            eos_tokens.push(num.as_i64().unwrap() as i32);
+                        } else {
+                            return None;
+                        }
+                    } else {
+                        return None;
+                    }
+                }
+                Some(eos_tokens)
+            }
+            _ => None,
+        }
     }
 
-    #[cfg(feature = "hf_hub")]
     pub fn from_path<P>(
         path: P,
         vocab_size: Option<usize>,
@@ -150,40 +163,12 @@ impl TokenizerInfo {
         let backend_str = std::fs::read_to_string(&tokenizer_json_path)
             .map_err(XGrammarErr::TokenizerLoadFailed)?;
 
-        let hf_config = Self::get_config(path)?;
-        let eos_token = get_json_field(&hf_config, HF_CONFIG_EOS_TOKEN_ID_KEY)?;
+        let eos_token = Self::parse_eos_token(&path.join(GENERATION_CONFIG_FILE), EOS_TOKEN_ID_KEY)
+            .or_else(|| Self::parse_eos_token(&path.join(HF_CONFIG_FILE), EOS_TOKEN_ID_KEY));
 
         let mut stop_token_ids = stop_token_ids.unwrap_or_default();
-
-        match eos_token {
-            Value::Number(eos_token_id) => {
-                if eos_token_id.is_i64() {
-                    let eos_token_id = eos_token_id.as_i64().unwrap() as i32;
-                    stop_token_ids.push(eos_token_id);
-                } else {
-                    return Err(XGrammarErr::TokenizerParseFailed(
-                        "eos_token must be an integer".to_string(),
-                    ));
-                }
-            }
-            Value::Array(eos_token_ids) => {
-                for token in eos_token_ids {
-                    if token.is_i64() {
-                        let token_id = token.as_i64().unwrap() as i32;
-                        stop_token_ids.push(token_id);
-                    } else {
-                        return Err(XGrammarErr::TokenizerParseFailed(
-                            "eos_token array must contain integers".to_string(),
-                        ));
-                    }
-                }
-            }
-            _ => {
-                return Err(XGrammarErr::TokenizerParseFailed(
-                    "eos_token must be a string or an array of strings".to_string(),
-                ));
-            }
-        }
+        stop_token_ids.extend(eos_token.unwrap_or_default());
+        stop_token_ids.dedup();
 
         Self::from_backend_str(&backend_str, vocab_size, stop_token_ids)
     }
