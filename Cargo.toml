@@ -3,6 +3,7 @@ name = "xgrammar"
 version = "0.1.3"
 authors = ["Hyunsik Choi <hyunsik@furiosa.ai>"]
 edition = "2024"
+license = "Apache-2.0"
 
 exclude = [".github/*"]
 
