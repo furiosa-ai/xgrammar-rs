@@ -64,6 +64,6 @@ fn test_tokenizer_info() {
             .expect("Failed to get tokenizer info");
         assert_metadata(&tokenizer_info, vocab_type, add_prefix_space);
 
-        assert_eq!(tokenizer.get_vocab_size(false), tokenizer_info.get_vocab_size() as usize);
+        assert_eq!(tokenizer.get_vocab_size(true), tokenizer_info.get_vocab_size() as usize);
     }
 }

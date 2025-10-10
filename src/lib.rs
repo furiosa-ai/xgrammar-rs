@@ -6,6 +6,7 @@ mod utils;
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::path::Path;
+use std::str::FromStr;
 
 use cpp::{cpp, cpp_class};
 use dlpark::{traits::TensorView, versioned::SafeManagedTensorVersioned as DLTensor};
@@ -100,22 +101,25 @@ impl TokenizerInfo {
         vocab_size: Option<usize>,
         stop_token_ids: Vec<TokenId>,
     ) -> self::Result<Self> {
-        let backend_json: serde_json::Value =
-            serde_json::from_str(backend_str).expect("Failed to parse backend string as JSON");
-        let model = get_json_field(&backend_json, TOKENIZER_MODEL_KEY)?;
-        let vocab_map = get_json_field(model, TOKENIZER_VOCAB_KEY)?;
-        let vocab_map: HashMap<String, u32> =
-            serde_json::from_value(vocab_map.clone()).map_err(|e| {
-                XGrammarErr::TokenizerParseFailed(format!("Failed to parse vocab map: {}", e))
-            })?;
-
+        let tokenizer = tokenizers::Tokenizer::from_str(backend_str).map_err(|e| {
+            XGrammarErr::TokenizerParseFailed(format!("failed to parse tokenizer: {}", e))
+        })?;
+        let vocab_map = tokenizer.get_vocab(true); // with added special tokens
         let max_id = vocab_map
             .values()
             .max()
             .ok_or(XGrammarErr::InvalidTokenizerConfig("Vocab map is empty".to_string()))?;
         let tokenizer_vocab_size = std::cmp::max(vocab_map.len(), (max_id + 1) as usize);
+        if let Some(vocab_size) = vocab_size {
+            if vocab_size != tokenizer_vocab_size {
+                tracing::warn!(
+                    "Provided vocab_size {} does not match tokenizer vocab size {}. Using provided vocab_size.",
+                    vocab_size,
+                    tokenizer_vocab_size
+                );
+            }
+        }
         let final_vocab_size = vocab_size.unwrap_or(tokenizer_vocab_size);
-
         let tokenizer_metadata = Self::detect_metadata_from_hf(backend_str);
         let vocab_type = tokenizer_metadata.vocab_type;
         let add_prefix_space = tokenizer_metadata.add_prefix_space;
