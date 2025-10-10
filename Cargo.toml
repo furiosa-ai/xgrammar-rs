@@ -2,6 +2,7 @@
 name = "xgrammar"
 version = "0.1.3"
 authors = ["Hyunsik Choi <hyunsik@furiosa.ai>"]
+description = "Rust bindings for XGrammar"
 edition = "2024"
 license = "Apache-2.0"
 
