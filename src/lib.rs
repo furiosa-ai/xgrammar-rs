@@ -554,7 +554,7 @@ impl GrammarCompiler {
     ///
     /// # Example
     /// ```no_run
-    /// # use xgrammar_rs::{GrammarCompiler, TokenizerInfo};
+    /// # use xgrammar::{GrammarCompiler, TokenizerInfo};
     /// # fn example(tokenizer_info: &TokenizerInfo) {
     /// let compiler = GrammarCompiler::new(tokenizer_info);
     /// let structural_tag_json = r#"{"tags": [{"begin": "<start>", "schema": "{}", "end": "</start>"}], "triggers": ["trigger1"]}"#;
@@ -576,8 +576,52 @@ impl GrammarCompiler {
     }
 }
 
+/// Represents a context-free grammar for grammar-guided text generation.
+///
+/// The Grammar struct supports Extended Backus-Naur Form (EBNF) grammar specifications
+/// following the GBNF specification from llama.cpp. It provides flexible grammar generation
+/// and manipulation for constrained text generation tasks.
+///
+/// # Construction Methods
+///
+/// Grammar can be constructed from various sources:
+/// - [`Grammar::from_ebnf`]: From EBNF grammar strings
+/// - [`Grammar::from_json_schema`]: From JSON schema specifications
+/// - [`Grammar::from_regex`]: From regular expression patterns
+/// - [`Grammar::from_structural_tag`]: From structural tags with embedded schemas
+/// - [`Grammar::builtin_json_grammar`]: Standard JSON grammar
+///
+/// # Grammar Operations
+///
+/// Multiple grammars can be combined using:
+/// - [`Grammar::union`]: Creates a grammar matching any of the input grammars (equivalent to `|` operator)
+/// - [`Grammar::concat`]: Creates a grammar matching concatenated sequences (equivalent to `+` operator)
 impl Grammar {
-    /// Construct a BNF grammar with a EBNF-formatted string.
+    /// Construct a grammar from an EBNF-formatted string.
+    ///
+    /// This method creates a context-free grammar from an Extended Backus-Naur Form (EBNF)
+    /// specification. The grammar follows the GBNF specification from llama.cpp.
+    ///
+    /// # Arguments
+    /// * `ebnf_string` - The EBNF grammar specification string
+    /// * `root_rule_name` - The name of the root rule to use as the entry point. If None, uses "root"
+    ///
+    /// # Returns
+    /// * A Grammar object constructed from the EBNF specification
+    ///
+    /// # Panics
+    /// * Panics if the EBNF string or root rule name contains null bytes
+    ///
+    /// # Example
+    /// ```
+    /// # use xgrammar::Grammar;
+    /// let ebnf = r#"
+    /// root ::= "Hello, " name "!"
+    /// name ::= [A-Z][a-z]+
+    /// "#;
+    /// let grammar = Grammar::from_ebnf(ebnf, Some("root"));
+    /// assert!(!grammar.is_null());
+    /// ```
     pub fn from_ebnf(ebnf_string: &str, root_rule_name: Option<&str>) -> Self {
         let ebnf_string_cstring =
             CString::new(ebnf_string).expect("Failed to convert ebnf_string to CString");
@@ -595,19 +639,54 @@ impl Grammar {
         })
     }
 
-    /// Construct a BNF grammar from the json schema string.
+    /// Construct a grammar from a JSON schema string.
+    ///
+    /// This method creates a grammar from a JSON schema specification that enforces schema
+    /// constraints during text generation. The schema can be in JSON string format or
+    /// represent a Pydantic-style model structure.
     ///
     /// # Arguments
-    /// * `schema` - The JSON schema string
-    /// * `any_whitespace` - Whether to allow any whitespace in the JSON. Default: true
-    /// * `indent` - The number of spaces for indentation. If None, no indentation is applied
-    /// * `separators` - Custom separators for JSON formatting as (object_separator, array_separator)
-    /// * `strict_mode` - Whether to use strict mode for JSON schema validation. Default: true
-    /// * `max_whitespace_cnt` - Maximum number of consecutive whitespace characters allowed. If None, no limit is applied
-    /// * `print_converted_ebnf` - Whether to print the converted EBNF grammar. Default: false
+    /// * `schema` - The JSON schema string defining the structure to enforce
+    /// * `any_whitespace` - Whether to allow flexible whitespace in the JSON output. When true,
+    ///   any amount of whitespace is allowed between tokens
+    /// * `indent` - Number of spaces for indentation in the JSON output. When specified,
+    ///   produces formatted JSON with the given indentation level
+    /// * `separators` - Custom separators for JSON formatting as (item_separator, key_separator).
+    ///   For example, `(":", ",")` produces compact JSON. When None, uses standard JSON separators
+    /// * `strict_mode` - Whether to enforce strict JSON schema validation. When true, ensures
+    ///   all schema constraints are strictly enforced
+    /// * `max_whitespace_cnt` - Maximum number of consecutive whitespace characters allowed.
+    ///   Useful for preventing excessive whitespace in generated output
+    /// * `print_converted_ebnf` - Whether to print the converted EBNF grammar for debugging purposes
     ///
     /// # Returns
-    /// * A Grammar constructed from the JSON schema
+    /// * A Grammar object that enforces the JSON schema constraints
+    ///
+    /// # Panics
+    /// * Panics if the schema string contains null bytes
+    ///
+    /// # Example
+    /// ```
+    /// # use xgrammar::Grammar;
+    /// let schema = r#"{
+    ///   "type": "object",
+    ///   "properties": {
+    ///     "name": {"type": "string"},
+    ///     "age": {"type": "integer"}
+    ///   },
+    ///   "required": ["name", "age"]
+    /// }"#;
+    /// let grammar = Grammar::from_json_schema(
+    ///     schema,
+    ///     Some(true),    // allow flexible whitespace
+    ///     Some(2),       // 2-space indentation
+    ///     None,          // default separators
+    ///     Some(true),    // strict mode
+    ///     None,          // no whitespace limit
+    ///     Some(false)    // don't print EBNF
+    /// );
+    /// assert!(!grammar.is_null());
+    /// ```
     pub fn from_json_schema(
         schema: &str,
         any_whitespace: Option<bool>,
@@ -679,6 +758,28 @@ impl Grammar {
     }
 
     /// Construct a grammar from a regular expression string.
+    ///
+    /// This method creates a grammar by converting a regular expression pattern into
+    /// an EBNF grammar specification. The resulting grammar matches text conforming
+    /// to the specified regex pattern.
+    ///
+    /// # Arguments
+    /// * `regex` - The regular expression pattern string to convert
+    /// * `print_converted_ebnf` - Whether to print the converted EBNF grammar for debugging purposes
+    ///
+    /// # Returns
+    /// * A Grammar object that matches the regex pattern
+    ///
+    /// # Panics
+    /// * Panics if the regex string contains null bytes
+    ///
+    /// # Example
+    /// ```
+    /// # use xgrammar::Grammar;
+    /// // Match email-like patterns
+    /// let grammar = Grammar::from_regex(r"[a-z]+@[a-z]+\.[a-z]+", Some(false));
+    /// assert!(!grammar.is_null());
+    /// ```
     pub fn from_regex(regex: &str, print_converted_ebnf: Option<bool>) -> Self {
         let regex_cstring = CString::new(regex).expect("Failed to convert regex to CString");
         let regex_ptr = regex_cstring.as_ptr();
@@ -694,22 +795,56 @@ impl Grammar {
 
     /// Construct a grammar from a structural tag JSON string.
     ///
-    /// This method parses a JSON string containing structural tag configuration
-    /// and creates a grammar from it. The JSON should specify the structural
-    /// tag items and triggers.
+    /// This method creates a grammar from structural tags that enable grammar-guided generation
+    /// with specific formatting markers. Structural tags are useful for dispatching between
+    /// different grammars based on trigger tokens and wrapping content with specific begin/end tags.
+    ///
+    /// The structural tag format supports:
+    /// - Single tag specification with begin marker, JSON schema, and end marker
+    /// - Multiple tags for grammar dispatching based on triggers
+    /// - Legacy tag/trigger pattern support
     ///
     /// # Arguments
-    /// * `structural_tag_json` - A JSON string specifying the structural tag configuration
+    /// * `structural_tag_json` - A JSON string specifying the structural tag configuration.
+    ///   The JSON should contain structural tag items with `begin`, `schema`, and `end` fields,
+    ///   and optionally `triggers` for grammar dispatching.
     ///
     /// # Returns
     /// * `Ok(Grammar)` if the JSON is valid and the grammar was successfully created
     /// * `Err(XGrammarErr)` if the JSON is invalid or the structural tag is malformed
     ///
     /// # Example
-    /// ```no_run
-    /// # use xgrammar_rs::Grammar;
-    /// let structural_tag_json = r#"{"tags": [{"begin": "<start>", "schema": "{}", "end": "</start>"}], "triggers": ["trigger1"]}"#;
-    /// let grammar = Grammar::from_structural_tag(structural_tag_json).unwrap();
+    /// ```
+    /// # use xgrammar::Grammar;
+    /// use serde_json::json;
+    ///
+    /// // Triggered tags example for tool calling with multiple functions
+    /// let structural_tag = json!({
+    ///     "format": {
+    ///         "type": "triggered_tags",
+    ///         "triggers": ["<function="],
+    ///         "tags": [
+    ///             {
+    ///                 "begin": "<function=get_weather>",
+    ///                 "content": {
+    ///                     "type": "json_schema",
+    ///                     "json_schema": {
+    ///                         "type": "object",
+    ///                         "properties": {
+    ///                             "city": {"type": "string"},
+    ///                             "unit": {"type": "string", "enum": ["celsius", "fahrenheit"]}
+    ///                         },
+    ///                         "required": ["city"]
+    ///                     }
+    ///                 },
+    ///                 "end": "</function>"
+    ///             }
+    ///         ]
+    ///     }
+    /// });
+    ///
+    /// let grammar = Grammar::from_structural_tag(&structural_tag.to_string()).unwrap();
+    /// assert!(!grammar.is_null());
     /// ```
     pub fn from_structural_tag(structural_tag_json: &str) -> Result<Self> {
         let structural_tag_json_cstring = CString::new(structural_tag_json)
@@ -764,14 +899,47 @@ impl Grammar {
         }
     }
 
-    /// Get the grammar of standard JSON format.
+    /// Get a grammar for standard JSON format.
+    ///
+    /// This method returns a pre-built grammar that matches any valid JSON according
+    /// to the JSON specification, without schema constraints. It's useful as a starting
+    /// point for JSON generation or when you need to accept any valid JSON structure.
+    ///
+    /// # Returns
+    /// * A Grammar object that matches standard JSON format
+    ///
+    /// # Example
+    /// ```
+    /// # use xgrammar::Grammar;
+    /// let json_grammar = Grammar::builtin_json_grammar();
+    /// assert!(!json_grammar.is_null());
+    /// ```
     pub fn builtin_json_grammar() -> Self {
         cpp!(unsafe [] -> Grammar as "xgrammar::Grammar" {
             return xgrammar::Grammar::BuiltinJSONGrammar();
         })
     }
 
-    /// Create a grammar that matches any of the grammars in the list.
+    /// Create a grammar that matches any of the provided grammars.
+    ///
+    /// This method combines multiple grammars using a union operation, creating a new grammar
+    /// that accepts input matching any of the input grammars. This is equivalent to the `|`
+    /// (OR) operator in regular expressions.
+    ///
+    /// # Arguments
+    /// * `grammars` - A slice of Grammar objects to combine
+    ///
+    /// # Returns
+    /// * A new Grammar that matches if any of the input grammars match
+    ///
+    /// # Example
+    /// ```
+    /// # use xgrammar::Grammar;
+    /// let grammar1 = Grammar::from_regex(r"[0-9]+", Some(false));
+    /// let grammar2 = Grammar::from_regex(r"[a-z]+", Some(false));
+    /// let union_grammar = Grammar::union(&[grammar1, grammar2]);
+    /// assert!(!union_grammar.is_null());
+    /// ```
     pub fn union(grammars: &[Grammar]) -> Self {
         let grammars_ptr = grammars.as_ptr();
         let num_grammars = grammars.len();
@@ -788,7 +956,27 @@ impl Grammar {
         })
     }
 
-    /// Create a grammar that matches the concatenation of the grammars in the list.
+    /// Create a grammar that matches the concatenation of the provided grammars.
+    ///
+    /// This method combines multiple grammars in sequence, creating a new grammar that requires
+    /// input to match all grammars in order. This is equivalent to the `+` (concatenation)
+    /// operator in formal language theory.
+    ///
+    /// # Arguments
+    /// * `grammars` - A slice of Grammar objects to concatenate in order
+    ///
+    /// # Returns
+    /// * A new Grammar that matches the sequential combination of all input grammars
+    ///
+    /// # Example
+    /// ```
+    /// # use xgrammar::Grammar;
+    /// let greeting = Grammar::from_regex(r"Hello", Some(false));
+    /// let space = Grammar::from_regex(r" ", Some(false));
+    /// let name = Grammar::from_regex(r"[A-Z][a-z]+", Some(false));
+    /// let concat_grammar = Grammar::concat(&[greeting, space, name]);
+    /// assert!(!concat_grammar.is_null());
+    /// ```
     pub fn concat(grammars: &[Grammar]) -> Self {
         let grammars_ptr = grammars.as_ptr();
         let num_grammars = grammars.len();
@@ -806,6 +994,20 @@ impl Grammar {
     }
 
     /// Check if the grammar object is null.
+    ///
+    /// A null grammar typically indicates an uninitialized or invalid grammar state.
+    /// This can occur when grammar construction fails or when working with default values.
+    ///
+    /// # Returns
+    /// * `true` if the grammar is null (invalid/uninitialized)
+    /// * `false` if the grammar is valid
+    ///
+    /// # Example
+    /// ```
+    /// # use xgrammar::Grammar;
+    /// let grammar = Grammar::builtin_json_grammar();
+    /// assert!(!grammar.is_null());
+    /// ```
     pub fn is_null(&self) -> bool {
         cpp!(unsafe [self as "const xgrammar::Grammar*"] -> bool as "bool" {
             return self->IsNull();
