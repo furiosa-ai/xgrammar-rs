@@ -1,21 +1,230 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `Grammar` struct in crate `xgrammar`."><title>Grammar in xgrammar - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-916cea96.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="xgrammar" data-themes="" data-resource-suffix="" data-rustdoc-version="1.87.0-nightly (aa8f0fd71 2025-03-23)" data-channel="nightly" data-search-js="search-e7298875.js" data-settings-js="settings-d72f25bb.js" ><script src="../static.files/storage-82c7156e.js"></script><script defer src="sidebar-items.js"></script><script defer src="../static.files/main-fb8c74a8.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc struct"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle" title="show sidebar"></button></nav><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../xgrammar/index.html">xgrammar</a><span class="version">0.1.0</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Grammar</a></h2><h3><a href="#implementations">Methods</a></h3><ul class="block method"><li><a href="#method.builtin_json_grammar" title="builtin_json_grammar">builtin_json_grammar</a></li><li><a href="#method.concat" title="concat">concat</a></li><li><a href="#method.from_ebnf" title="from_ebnf">from_ebnf</a></li><li><a href="#method.from_json_schema" title="from_json_schema">from_json_schema</a></li><li><a href="#method.from_regex" title="from_regex">from_regex</a></li><li><a href="#method.from_structural_tag" title="from_structural_tag">from_structural_tag</a></li><li><a href="#method.is_null" title="is_null">is_null</a></li><li><a href="#method.union" title="union">union</a></li></ul><h3><a href="#trait-implementations">Trait Implementations</a></h3><ul class="block trait-implementation"><li><a href="#impl-Clone-for-Grammar" title="Clone">Clone</a></li><li><a href="#impl-Drop-for-Grammar" title="Drop">Drop</a></li></ul><h3><a href="#synthetic-implementations">Auto Trait Implementations</a></h3><ul class="block synthetic-implementation"><li><a href="#impl-Freeze-for-Grammar" title="Freeze">Freeze</a></li><li><a href="#impl-RefUnwindSafe-for-Grammar" title="RefUnwindSafe">RefUnwindSafe</a></li><li><a href="#impl-Send-for-Grammar" title="Send">Send</a></li><li><a href="#impl-Sync-for-Grammar" title="Sync">Sync</a></li><li><a href="#impl-Unpin-for-Grammar" title="Unpin">Unpin</a></li><li><a href="#impl-UnwindSafe-for-Grammar" title="UnwindSafe">UnwindSafe</a></li></ul><h3><a href="#blanket-implementations">Blanket Implementations</a></h3><ul class="block blanket-implementation"><li><a href="#impl-Any-for-T" title="Any">Any</a></li><li><a href="#impl-Borrow%3CT%3E-for-T" title="Borrow&#60;T&#62;">Borrow&#60;T&#62;</a></li><li><a href="#impl-BorrowMut%3CT%3E-for-T" title="BorrowMut&#60;T&#62;">BorrowMut&#60;T&#62;</a></li><li><a href="#impl-CloneToUninit-for-T" title="CloneToUninit">CloneToUninit</a></li><li><a href="#impl-ErasedDestructor-for-T" title="ErasedDestructor">ErasedDestructor</a></li><li><a href="#impl-From%3CT%3E-for-T" title="From&#60;T&#62;">From&#60;T&#62;</a></li><li><a href="#impl-Instrument-for-T" title="Instrument">Instrument</a></li><li><a href="#impl-Into%3CU%3E-for-T" title="Into&#60;U&#62;">Into&#60;U&#62;</a></li><li><a href="#impl-IntoEither-for-T" title="IntoEither">IntoEither</a></li><li><a href="#impl-MaybeSendSync-for-T" title="MaybeSendSync">MaybeSendSync</a></li><li><a href="#impl-Pointable-for-T" title="Pointable">Pointable</a></li><li><a href="#impl-ToOwned-for-T" title="ToOwned">ToOwned</a></li><li><a href="#impl-TryFrom%3CU%3E-for-T" title="TryFrom&#60;U&#62;">TryFrom&#60;U&#62;</a></li><li><a href="#impl-TryInto%3CU%3E-for-T" title="TryInto&#60;U&#62;">TryInto&#60;U&#62;</a></li><li><a href="#impl-VZip%3CV%3E-for-T" title="VZip&#60;V&#62;">VZip&#60;V&#62;</a></li><li><a href="#impl-WithSubscriber-for-T" title="WithSubscriber">WithSubscriber</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="index.html">In crate xgrammar</a></h2></div></div></nav><div class="sidebar-resizer"></div><main><div class="width-limiter"><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="index.html">xgrammar</a></div><h1>Struct <span class="struct">Grammar</span><button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/xgrammar/lib.rs.html#64-66">Source</a> </span></div><pre class="rust item-decl"><code><div class="code-attribute">#[repr(C)]</div>pub struct Grammar { <span class="comment">/* private fields */</span> }</code></pre><h2 id="implementations" class="section-header">Implementations<a href="#implementations" class="anchor">§</a></h2><div id="implementations-list"><details class="toggle implementors-toggle" open><summary><section id="impl-Grammar" class="impl"><a class="src rightside" href="../src/xgrammar/lib.rs.html#599-789">Source</a><a href="#impl-Grammar" class="anchor">§</a><h3 class="code-header">impl <a class="struct" href="struct.Grammar.html" title="struct xgrammar::Grammar">Grammar</a></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.from_ebnf" class="method"><a class="src rightside" href="../src/xgrammar/lib.rs.html#601-616">Source</a><h4 class="code-header">pub fn <a href="#method.from_ebnf" class="fn">from_ebnf</a>(ebnf_string: &amp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, root_rule_name: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;&amp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>&gt;) -&gt; Self</h4></section></summary><div class="docblock"><p>Construct a BNF grammar with a EBNF-formatted string.</p>
-</div></details><details class="toggle method-toggle" open><summary><section id="method.from_json_schema" class="method"><a class="src rightside" href="../src/xgrammar/lib.rs.html#619-679">Source</a><h4 class="code-header">pub fn <a href="#method.from_json_schema" class="fn">from_json_schema</a>(
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="API documentation for the Rust `Grammar` struct in crate `xgrammar`."><title>Grammar in xgrammar - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2" crossorigin href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-916cea96.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="xgrammar" data-themes="" data-resource-suffix="" data-rustdoc-version="1.87.0-nightly (aa8f0fd71 2025-03-23)" data-channel="nightly" data-search-js="search-e7298875.js" data-settings-js="settings-d72f25bb.js" ><script src="../static.files/storage-82c7156e.js"></script><script defer src="sidebar-items.js"></script><script defer src="../static.files/main-fb8c74a8.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-893ab5e7.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-6580c154.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc struct"><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><nav class="mobile-topbar"><button class="sidebar-menu-toggle" title="show sidebar"></button></nav><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../xgrammar/index.html">xgrammar</a><span class="version">0.1.3</span></h2></div><div class="sidebar-elems"><section id="rustdoc-toc"><h2 class="location"><a href="#">Grammar</a></h2><h3><a href="#implementations">Methods</a></h3><ul class="block method"><li><a href="#method.builtin_json_grammar" title="builtin_json_grammar">builtin_json_grammar</a></li><li><a href="#method.concat" title="concat">concat</a></li><li><a href="#method.from_ebnf" title="from_ebnf">from_ebnf</a></li><li><a href="#method.from_json_schema" title="from_json_schema">from_json_schema</a></li><li><a href="#method.from_regex" title="from_regex">from_regex</a></li><li><a href="#method.from_structural_tag" title="from_structural_tag">from_structural_tag</a></li><li><a href="#method.is_null" title="is_null">is_null</a></li><li><a href="#method.union" title="union">union</a></li></ul><h3><a href="#trait-implementations">Trait Implementations</a></h3><ul class="block trait-implementation"><li><a href="#impl-Clone-for-Grammar" title="Clone">Clone</a></li><li><a href="#impl-Drop-for-Grammar" title="Drop">Drop</a></li></ul><h3><a href="#synthetic-implementations">Auto Trait Implementations</a></h3><ul class="block synthetic-implementation"><li><a href="#impl-Freeze-for-Grammar" title="Freeze">Freeze</a></li><li><a href="#impl-RefUnwindSafe-for-Grammar" title="RefUnwindSafe">RefUnwindSafe</a></li><li><a href="#impl-Send-for-Grammar" title="Send">Send</a></li><li><a href="#impl-Sync-for-Grammar" title="Sync">Sync</a></li><li><a href="#impl-Unpin-for-Grammar" title="Unpin">Unpin</a></li><li><a href="#impl-UnwindSafe-for-Grammar" title="UnwindSafe">UnwindSafe</a></li></ul><h3><a href="#blanket-implementations">Blanket Implementations</a></h3><ul class="block blanket-implementation"><li><a href="#impl-Any-for-T" title="Any">Any</a></li><li><a href="#impl-Borrow%3CT%3E-for-T" title="Borrow&#60;T&#62;">Borrow&#60;T&#62;</a></li><li><a href="#impl-BorrowMut%3CT%3E-for-T" title="BorrowMut&#60;T&#62;">BorrowMut&#60;T&#62;</a></li><li><a href="#impl-CloneToUninit-for-T" title="CloneToUninit">CloneToUninit</a></li><li><a href="#impl-ErasedDestructor-for-T" title="ErasedDestructor">ErasedDestructor</a></li><li><a href="#impl-From%3CT%3E-for-T" title="From&#60;T&#62;">From&#60;T&#62;</a></li><li><a href="#impl-Instrument-for-T" title="Instrument">Instrument</a></li><li><a href="#impl-Into%3CU%3E-for-T" title="Into&#60;U&#62;">Into&#60;U&#62;</a></li><li><a href="#impl-IntoEither-for-T" title="IntoEither">IntoEither</a></li><li><a href="#impl-MaybeSendSync-for-T" title="MaybeSendSync">MaybeSendSync</a></li><li><a href="#impl-Pointable-for-T" title="Pointable">Pointable</a></li><li><a href="#impl-ToOwned-for-T" title="ToOwned">ToOwned</a></li><li><a href="#impl-TryFrom%3CU%3E-for-T" title="TryFrom&#60;U&#62;">TryFrom&#60;U&#62;</a></li><li><a href="#impl-TryInto%3CU%3E-for-T" title="TryInto&#60;U&#62;">TryInto&#60;U&#62;</a></li><li><a href="#impl-VZip%3CV%3E-for-T" title="VZip&#60;V&#62;">VZip&#60;V&#62;</a></li><li><a href="#impl-WithSubscriber-for-T" title="WithSubscriber">WithSubscriber</a></li></ul></section><div id="rustdoc-modnav"><h2 class="in-crate"><a href="index.html">In crate xgrammar</a></h2></div></div></nav><div class="sidebar-resizer"></div><main><div class="width-limiter"><rustdoc-search></rustdoc-search><section id="main-content" class="content"><div class="main-heading"><div class="rustdoc-breadcrumbs"><a href="index.html">xgrammar</a></div><h1>Struct <span class="struct">Grammar</span><button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/xgrammar/lib.rs.html#64-66">Source</a> </span></div><pre class="rust item-decl"><code><div class="code-attribute">#[repr(C)]</div>pub struct Grammar { <span class="comment">/* private fields */</span> }</code></pre><h2 id="implementations" class="section-header">Implementations<a href="#implementations" class="anchor">§</a></h2><div id="implementations-list"><details class="toggle implementors-toggle" open><summary><section id="impl-Grammar" class="impl"><a class="src rightside" href="../src/xgrammar/lib.rs.html#599-1016">Source</a><a href="#impl-Grammar" class="anchor">§</a><h3 class="code-header">impl <a class="struct" href="struct.Grammar.html" title="struct xgrammar::Grammar">Grammar</a></h3><div class="docblock"><p>Represents a context-free grammar for grammar-guided text generation.</p>
+</div></section></summary><div class="docblock"><p>The Grammar struct supports Extended Backus-Naur Form (EBNF) grammar specifications
+following the GBNF specification from llama.cpp. It provides flexible grammar generation
+and manipulation for constrained text generation tasks.</p>
+<h4 id="construction-methods"><a class="doc-anchor" href="#construction-methods">§</a>Construction Methods</h4>
+<p>Grammar can be constructed from various sources:</p>
+<ul>
+<li><a href="struct.Grammar.html#method.from_ebnf" title="associated function xgrammar::Grammar::from_ebnf"><code>Grammar::from_ebnf</code></a>: From EBNF grammar strings</li>
+<li><a href="struct.Grammar.html#method.from_json_schema" title="associated function xgrammar::Grammar::from_json_schema"><code>Grammar::from_json_schema</code></a>: From JSON schema specifications</li>
+<li><a href="struct.Grammar.html#method.from_regex" title="associated function xgrammar::Grammar::from_regex"><code>Grammar::from_regex</code></a>: From regular expression patterns</li>
+<li><a href="struct.Grammar.html#method.from_structural_tag" title="associated function xgrammar::Grammar::from_structural_tag"><code>Grammar::from_structural_tag</code></a>: From structural tags with embedded schemas</li>
+<li><a href="struct.Grammar.html#method.builtin_json_grammar" title="associated function xgrammar::Grammar::builtin_json_grammar"><code>Grammar::builtin_json_grammar</code></a>: Standard JSON grammar</li>
+</ul>
+<h4 id="grammar-operations"><a class="doc-anchor" href="#grammar-operations">§</a>Grammar Operations</h4>
+<p>Multiple grammars can be combined using:</p>
+<ul>
+<li><a href="struct.Grammar.html#method.union" title="associated function xgrammar::Grammar::union"><code>Grammar::union</code></a>: Creates a grammar matching any of the input grammars (equivalent to <code>|</code> operator)</li>
+<li><a href="struct.Grammar.html#method.concat" title="associated function xgrammar::Grammar::concat"><code>Grammar::concat</code></a>: Creates a grammar matching concatenated sequences (equivalent to <code>+</code> operator)</li>
+</ul>
+</div><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.from_ebnf" class="method"><a class="src rightside" href="../src/xgrammar/lib.rs.html#625-640">Source</a><h4 class="code-header">pub fn <a href="#method.from_ebnf" class="fn">from_ebnf</a>(ebnf_string: &amp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, root_rule_name: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;&amp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>&gt;) -&gt; Self</h4></section></summary><div class="docblock"><p>Construct a grammar from an EBNF-formatted string.</p>
+<p>This method creates a context-free grammar from an Extended Backus-Naur Form (EBNF)
+specification. The grammar follows the GBNF specification from llama.cpp.</p>
+<h5 id="arguments"><a class="doc-anchor" href="#arguments">§</a>Arguments</h5>
+<ul>
+<li><code>ebnf_string</code> - The EBNF grammar specification string</li>
+<li><code>root_rule_name</code> - The name of the root rule to use as the entry point. If None, uses “root”</li>
+</ul>
+<h5 id="returns"><a class="doc-anchor" href="#returns">§</a>Returns</h5>
+<ul>
+<li>A Grammar object constructed from the EBNF specification</li>
+</ul>
+<h5 id="panics"><a class="doc-anchor" href="#panics">§</a>Panics</h5>
+<ul>
+<li>Panics if the EBNF string or root rule name contains null bytes</li>
+</ul>
+<h5 id="example"><a class="doc-anchor" href="#example">§</a>Example</h5>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">let </span>ebnf = <span class="string">r#"
+root ::= "Hello, " name "!"
+name ::= [A-Z][a-z]+
+"#</span>;
+<span class="kw">let </span>grammar = Grammar::from_ebnf(ebnf, <span class="prelude-val">Some</span>(<span class="string">"root"</span>));
+<span class="macro">assert!</span>(!grammar.is_null());</code></pre></div>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.from_json_schema" class="method"><a class="src rightside" href="../src/xgrammar/lib.rs.html#690-758">Source</a><h4 class="code-header">pub fn <a href="#method.from_json_schema" class="fn">from_json_schema</a>(
     schema: &amp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
     any_whitespace: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>&gt;,
     indent: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.i32.html">i32</a>&gt;,
     separators: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;(<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>, <a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>)&gt;,
     strict_mode: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>&gt;,
+    max_whitespace_cnt: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.i32.html">i32</a>&gt;,
     print_converted_ebnf: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>&gt;,
-) -&gt; Self</h4></section></summary><div class="docblock"><p>Construct a BNF grammar from the json schema string.</p>
-</div></details><details class="toggle method-toggle" open><summary><section id="method.from_regex" class="method"><a class="src rightside" href="../src/xgrammar/lib.rs.html#682-693">Source</a><h4 class="code-header">pub fn <a href="#method.from_regex" class="fn">from_regex</a>(regex: &amp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, print_converted_ebnf: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>&gt;) -&gt; Self</h4></section></summary><div class="docblock"><p>Construct a grammar from a regular expression string.</p>
-</div></details><details class="toggle method-toggle" open><summary><section id="method.from_structural_tag" class="method"><a class="src rightside" href="../src/xgrammar/lib.rs.html#696-740">Source</a><h4 class="code-header">pub fn <a href="#method.from_structural_tag" class="fn">from_structural_tag</a>(
-    tags: &amp;[<a class="struct" href="struct.StructuralTagItem.html" title="struct xgrammar::StructuralTagItem">StructuralTagItem</a>],
-    triggers: &amp;[<a class="struct" href="https://doc.rust-lang.org/nightly/alloc/string/struct.String.html" title="struct alloc::string::String">String</a>],
-) -&gt; Self</h4></section></summary><div class="docblock"><p>Construct a grammar from a structural tag.</p>
-</div></details><details class="toggle method-toggle" open><summary><section id="method.builtin_json_grammar" class="method"><a class="src rightside" href="../src/xgrammar/lib.rs.html#743-747">Source</a><h4 class="code-header">pub fn <a href="#method.builtin_json_grammar" class="fn">builtin_json_grammar</a>() -&gt; Self</h4></section></summary><div class="docblock"><p>Get the grammar of standard JSON format.</p>
-</div></details><details class="toggle method-toggle" open><summary><section id="method.union" class="method"><a class="src rightside" href="../src/xgrammar/lib.rs.html#750-764">Source</a><h4 class="code-header">pub fn <a href="#method.union" class="fn">union</a>(grammars: &amp;[<a class="struct" href="struct.Grammar.html" title="struct xgrammar::Grammar">Grammar</a>]) -&gt; Self</h4></section></summary><div class="docblock"><p>Create a grammar that matches any of the grammars in the list.</p>
-</div></details><details class="toggle method-toggle" open><summary><section id="method.concat" class="method"><a class="src rightside" href="../src/xgrammar/lib.rs.html#767-781">Source</a><h4 class="code-header">pub fn <a href="#method.concat" class="fn">concat</a>(grammars: &amp;[<a class="struct" href="struct.Grammar.html" title="struct xgrammar::Grammar">Grammar</a>]) -&gt; Self</h4></section></summary><div class="docblock"><p>Create a grammar that matches the concatenation of the grammars in the list.</p>
-</div></details><details class="toggle method-toggle" open><summary><section id="method.is_null" class="method"><a class="src rightside" href="../src/xgrammar/lib.rs.html#784-788">Source</a><h4 class="code-header">pub fn <a href="#method.is_null" class="fn">is_null</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a></h4></section></summary><div class="docblock"><p>Check if the grammar object is null.</p>
+) -&gt; Self</h4></section></summary><div class="docblock"><p>Construct a grammar from a JSON schema string.</p>
+<p>This method creates a grammar from a JSON schema specification that enforces schema
+constraints during text generation. The schema can be in JSON string format or
+represent a Pydantic-style model structure.</p>
+<h5 id="arguments-1"><a class="doc-anchor" href="#arguments-1">§</a>Arguments</h5>
+<ul>
+<li><code>schema</code> - The JSON schema string defining the structure to enforce</li>
+<li><code>any_whitespace</code> - Whether to allow flexible whitespace in the JSON output. When true,
+any amount of whitespace is allowed between tokens</li>
+<li><code>indent</code> - Number of spaces for indentation in the JSON output. When specified,
+produces formatted JSON with the given indentation level</li>
+<li><code>separators</code> - Custom separators for JSON formatting as (item_separator, key_separator).
+For example, <code>(":", ",")</code> produces compact JSON. When None, uses standard JSON separators</li>
+<li><code>strict_mode</code> - Whether to enforce strict JSON schema validation. When true, ensures
+all schema constraints are strictly enforced</li>
+<li><code>max_whitespace_cnt</code> - Maximum number of consecutive whitespace characters allowed.
+Useful for preventing excessive whitespace in generated output</li>
+<li><code>print_converted_ebnf</code> - Whether to print the converted EBNF grammar for debugging purposes</li>
+</ul>
+<h5 id="returns-1"><a class="doc-anchor" href="#returns-1">§</a>Returns</h5>
+<ul>
+<li>A Grammar object that enforces the JSON schema constraints</li>
+</ul>
+<h5 id="panics-1"><a class="doc-anchor" href="#panics-1">§</a>Panics</h5>
+<ul>
+<li>Panics if the schema string contains null bytes</li>
+</ul>
+<h5 id="example-1"><a class="doc-anchor" href="#example-1">§</a>Example</h5>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">let </span>schema = <span class="string">r#"{
+  "type": "object",
+  "properties": {
+    "name": {"type": "string"},
+    "age": {"type": "integer"}
+  },
+  "required": ["name", "age"]
+}"#</span>;
+<span class="kw">let </span>grammar = Grammar::from_json_schema(
+    schema,
+    <span class="prelude-val">Some</span>(<span class="bool-val">true</span>),    <span class="comment">// allow flexible whitespace
+    </span><span class="prelude-val">Some</span>(<span class="number">2</span>),       <span class="comment">// 2-space indentation
+    </span><span class="prelude-val">None</span>,          <span class="comment">// default separators
+    </span><span class="prelude-val">Some</span>(<span class="bool-val">true</span>),    <span class="comment">// strict mode
+    </span><span class="prelude-val">None</span>,          <span class="comment">// no whitespace limit
+    </span><span class="prelude-val">Some</span>(<span class="bool-val">false</span>)    <span class="comment">// don't print EBNF
+</span>);
+<span class="macro">assert!</span>(!grammar.is_null());</code></pre></div>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.from_regex" class="method"><a class="src rightside" href="../src/xgrammar/lib.rs.html#783-794">Source</a><h4 class="code-header">pub fn <a href="#method.from_regex" class="fn">from_regex</a>(regex: &amp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>, print_converted_ebnf: <a class="enum" href="https://doc.rust-lang.org/nightly/core/option/enum.Option.html" title="enum core::option::Option">Option</a>&lt;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a>&gt;) -&gt; Self</h4></section></summary><div class="docblock"><p>Construct a grammar from a regular expression string.</p>
+<p>This method creates a grammar by converting a regular expression pattern into
+an EBNF grammar specification. The resulting grammar matches text conforming
+to the specified regex pattern.</p>
+<h5 id="arguments-2"><a class="doc-anchor" href="#arguments-2">§</a>Arguments</h5>
+<ul>
+<li><code>regex</code> - The regular expression pattern string to convert</li>
+<li><code>print_converted_ebnf</code> - Whether to print the converted EBNF grammar for debugging purposes</li>
+</ul>
+<h5 id="returns-2"><a class="doc-anchor" href="#returns-2">§</a>Returns</h5>
+<ul>
+<li>A Grammar object that matches the regex pattern</li>
+</ul>
+<h5 id="panics-2"><a class="doc-anchor" href="#panics-2">§</a>Panics</h5>
+<ul>
+<li>Panics if the regex string contains null bytes</li>
+</ul>
+<h5 id="example-2"><a class="doc-anchor" href="#example-2">§</a>Example</h5>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="comment">// Match email-like patterns
+</span><span class="kw">let </span>grammar = Grammar::from_regex(<span class="string">r"[a-z]+@[a-z]+\.[a-z]+"</span>, <span class="prelude-val">Some</span>(<span class="bool-val">false</span>));
+<span class="macro">assert!</span>(!grammar.is_null());</code></pre></div>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.from_structural_tag" class="method"><a class="src rightside" href="../src/xgrammar/lib.rs.html#849-900">Source</a><h4 class="code-header">pub fn <a href="#method.from_structural_tag" class="fn">from_structural_tag</a>(
+    structural_tag_json: &amp;<a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.str.html">str</a>,
+) -&gt; <a class="enum" href="https://doc.rust-lang.org/nightly/core/result/enum.Result.html" title="enum core::result::Result">Result</a>&lt;Self, XGrammarErr&gt;</h4></section></summary><div class="docblock"><p>Construct a grammar from a structural tag JSON string.</p>
+<p>This method creates a grammar from structural tags that enable grammar-guided generation
+with specific formatting markers. Structural tags are useful for dispatching between
+different grammars based on trigger tokens and wrapping content with specific begin/end tags.</p>
+<p>The structural tag format supports:</p>
+<ul>
+<li>Single tag specification with begin marker, JSON schema, and end marker</li>
+<li>Multiple tags for grammar dispatching based on triggers</li>
+<li>Legacy tag/trigger pattern support</li>
+</ul>
+<h5 id="arguments-3"><a class="doc-anchor" href="#arguments-3">§</a>Arguments</h5>
+<ul>
+<li><code>structural_tag_json</code> - A JSON string specifying the structural tag configuration.
+The JSON should contain structural tag items with <code>begin</code>, <code>schema</code>, and <code>end</code> fields,
+and optionally <code>triggers</code> for grammar dispatching.</li>
+</ul>
+<h5 id="returns-3"><a class="doc-anchor" href="#returns-3">§</a>Returns</h5>
+<ul>
+<li><code>Ok(Grammar)</code> if the JSON is valid and the grammar was successfully created</li>
+<li><code>Err(XGrammarErr)</code> if the JSON is invalid or the structural tag is malformed</li>
+</ul>
+<h5 id="example-3"><a class="doc-anchor" href="#example-3">§</a>Example</h5>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>serde_json::json;
+
+<span class="comment">// Triggered tags example for tool calling with multiple functions
+</span><span class="kw">let </span>structural_tag = <span class="macro">json!</span>({
+    <span class="string">"format"</span>: {
+        <span class="string">"type"</span>: <span class="string">"triggered_tags"</span>,
+        <span class="string">"triggers"</span>: [<span class="string">"&lt;function="</span>],
+        <span class="string">"tags"</span>: [
+            {
+                <span class="string">"begin"</span>: <span class="string">"&lt;function=get_weather&gt;"</span>,
+                <span class="string">"content"</span>: {
+                    <span class="string">"type"</span>: <span class="string">"json_schema"</span>,
+                    <span class="string">"json_schema"</span>: {
+                        <span class="string">"type"</span>: <span class="string">"object"</span>,
+                        <span class="string">"properties"</span>: {
+                            <span class="string">"city"</span>: {<span class="string">"type"</span>: <span class="string">"string"</span>},
+                            <span class="string">"unit"</span>: {<span class="string">"type"</span>: <span class="string">"string"</span>, <span class="string">"enum"</span>: [<span class="string">"celsius"</span>, <span class="string">"fahrenheit"</span>]}
+                        },
+                        <span class="string">"required"</span>: [<span class="string">"city"</span>]
+                    }
+                },
+                <span class="string">"end"</span>: <span class="string">"&lt;/function&gt;"
+            </span>}
+        ]
+    }
+});
+
+<span class="kw">let </span>grammar = Grammar::from_structural_tag(<span class="kw-2">&amp;</span>structural_tag.to_string()).unwrap();
+<span class="macro">assert!</span>(!grammar.is_null());</code></pre></div>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.builtin_json_grammar" class="method"><a class="src rightside" href="../src/xgrammar/lib.rs.html#917-921">Source</a><h4 class="code-header">pub fn <a href="#method.builtin_json_grammar" class="fn">builtin_json_grammar</a>() -&gt; Self</h4></section></summary><div class="docblock"><p>Get a grammar for standard JSON format.</p>
+<p>This method returns a pre-built grammar that matches any valid JSON according
+to the JSON specification, without schema constraints. It’s useful as a starting
+point for JSON generation or when you need to accept any valid JSON structure.</p>
+<h5 id="returns-4"><a class="doc-anchor" href="#returns-4">§</a>Returns</h5>
+<ul>
+<li>A Grammar object that matches standard JSON format</li>
+</ul>
+<h5 id="example-4"><a class="doc-anchor" href="#example-4">§</a>Example</h5>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">let </span>json_grammar = Grammar::builtin_json_grammar();
+<span class="macro">assert!</span>(!json_grammar.is_null());</code></pre></div>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.union" class="method"><a class="src rightside" href="../src/xgrammar/lib.rs.html#943-957">Source</a><h4 class="code-header">pub fn <a href="#method.union" class="fn">union</a>(grammars: &amp;[<a class="struct" href="struct.Grammar.html" title="struct xgrammar::Grammar">Grammar</a>]) -&gt; Self</h4></section></summary><div class="docblock"><p>Create a grammar that matches any of the provided grammars.</p>
+<p>This method combines multiple grammars using a union operation, creating a new grammar
+that accepts input matching any of the input grammars. This is equivalent to the <code>|</code>
+(OR) operator in regular expressions.</p>
+<h5 id="arguments-4"><a class="doc-anchor" href="#arguments-4">§</a>Arguments</h5>
+<ul>
+<li><code>grammars</code> - A slice of Grammar objects to combine</li>
+</ul>
+<h5 id="returns-5"><a class="doc-anchor" href="#returns-5">§</a>Returns</h5>
+<ul>
+<li>A new Grammar that matches if any of the input grammars match</li>
+</ul>
+<h5 id="example-5"><a class="doc-anchor" href="#example-5">§</a>Example</h5>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">let </span>grammar1 = Grammar::from_regex(<span class="string">r"[0-9]+"</span>, <span class="prelude-val">Some</span>(<span class="bool-val">false</span>));
+<span class="kw">let </span>grammar2 = Grammar::from_regex(<span class="string">r"[a-z]+"</span>, <span class="prelude-val">Some</span>(<span class="bool-val">false</span>));
+<span class="kw">let </span>union_grammar = Grammar::union(<span class="kw-2">&amp;</span>[grammar1, grammar2]);
+<span class="macro">assert!</span>(!union_grammar.is_null());</code></pre></div>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.concat" class="method"><a class="src rightside" href="../src/xgrammar/lib.rs.html#980-994">Source</a><h4 class="code-header">pub fn <a href="#method.concat" class="fn">concat</a>(grammars: &amp;[<a class="struct" href="struct.Grammar.html" title="struct xgrammar::Grammar">Grammar</a>]) -&gt; Self</h4></section></summary><div class="docblock"><p>Create a grammar that matches the concatenation of the provided grammars.</p>
+<p>This method combines multiple grammars in sequence, creating a new grammar that requires
+input to match all grammars in order. This is equivalent to the <code>+</code> (concatenation)
+operator in formal language theory.</p>
+<h5 id="arguments-5"><a class="doc-anchor" href="#arguments-5">§</a>Arguments</h5>
+<ul>
+<li><code>grammars</code> - A slice of Grammar objects to concatenate in order</li>
+</ul>
+<h5 id="returns-6"><a class="doc-anchor" href="#returns-6">§</a>Returns</h5>
+<ul>
+<li>A new Grammar that matches the sequential combination of all input grammars</li>
+</ul>
+<h5 id="example-6"><a class="doc-anchor" href="#example-6">§</a>Example</h5>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">let </span>greeting = Grammar::from_regex(<span class="string">r"Hello"</span>, <span class="prelude-val">Some</span>(<span class="bool-val">false</span>));
+<span class="kw">let </span>space = Grammar::from_regex(<span class="string">r" "</span>, <span class="prelude-val">Some</span>(<span class="bool-val">false</span>));
+<span class="kw">let </span>name = Grammar::from_regex(<span class="string">r"[A-Z][a-z]+"</span>, <span class="prelude-val">Some</span>(<span class="bool-val">false</span>));
+<span class="kw">let </span>concat_grammar = Grammar::concat(<span class="kw-2">&amp;</span>[greeting, space, name]);
+<span class="macro">assert!</span>(!concat_grammar.is_null());</code></pre></div>
+</div></details><details class="toggle method-toggle" open><summary><section id="method.is_null" class="method"><a class="src rightside" href="../src/xgrammar/lib.rs.html#1011-1015">Source</a><h4 class="code-header">pub fn <a href="#method.is_null" class="fn">is_null</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.bool.html">bool</a></h4></section></summary><div class="docblock"><p>Check if the grammar object is null.</p>
+<p>A null grammar typically indicates an uninitialized or invalid grammar state.
+This can occur when grammar construction fails or when working with default values.</p>
+<h5 id="returns-7"><a class="doc-anchor" href="#returns-7">§</a>Returns</h5>
+<ul>
+<li><code>true</code> if the grammar is null (invalid/uninitialized)</li>
+<li><code>false</code> if the grammar is valid</li>
+</ul>
+<h5 id="example-7"><a class="doc-anchor" href="#example-7">§</a>Example</h5>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">let </span>grammar = Grammar::builtin_json_grammar();
+<span class="macro">assert!</span>(!grammar.is_null());</code></pre></div>
 </div></details></div></details></div><h2 id="trait-implementations" class="section-header">Trait Implementations<a href="#trait-implementations" class="anchor">§</a></h2><div id="trait-implementations-list"><details class="toggle implementors-toggle" open><summary><section id="impl-Clone-for-Grammar" class="impl"><a class="src rightside" href="../src/xgrammar/lib.rs.html#64-66">Source</a><a href="#impl-Clone-for-Grammar" class="anchor">§</a><h3 class="code-header">impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html" title="trait core::clone::Clone">Clone</a> for <a class="struct" href="struct.Grammar.html" title="struct xgrammar::Grammar">Grammar</a></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.clone" class="method trait-impl"><a class="src rightside" href="../src/xgrammar/lib.rs.html#64-66">Source</a><a href="#method.clone" class="anchor">§</a><h4 class="code-header">fn <a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#tymethod.clone" class="fn">clone</a>(&amp;self) -&gt; Self</h4></section></summary><div class='docblock'>Returns a copy of the value. <a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#tymethod.clone">Read more</a></div></details><details class="toggle method-toggle" open><summary><section id="method.clone_from" class="method trait-impl"><span class="rightside"><span class="since" title="Stable since Rust version 1.0.0">1.0.0</span> · <a class="src" href="https://doc.rust-lang.org/nightly/src/core/clone.rs.html#174">Source</a></span><a href="#method.clone_from" class="anchor">§</a><h4 class="code-header">fn <a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#method.clone_from" class="fn">clone_from</a>(&amp;mut self, source: &amp;Self)</h4></section></summary><div class='docblock'>Performs copy-assignment from <code>source</code>. <a href="https://doc.rust-lang.org/nightly/core/clone/trait.Clone.html#method.clone_from">Read more</a></div></details></div></details><details class="toggle implementors-toggle" open><summary><section id="impl-Drop-for-Grammar" class="impl"><a class="src rightside" href="../src/xgrammar/lib.rs.html#64-66">Source</a><a href="#impl-Drop-for-Grammar" class="anchor">§</a><h3 class="code-header">impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/ops/drop/trait.Drop.html" title="trait core::ops::drop::Drop">Drop</a> for <a class="struct" href="struct.Grammar.html" title="struct xgrammar::Grammar">Grammar</a></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.drop" class="method trait-impl"><a class="src rightside" href="../src/xgrammar/lib.rs.html#64-66">Source</a><a href="#method.drop" class="anchor">§</a><h4 class="code-header">fn <a href="https://doc.rust-lang.org/nightly/core/ops/drop/trait.Drop.html#tymethod.drop" class="fn">drop</a>(&amp;mut self)</h4></section></summary><div class='docblock'>Executes the destructor for this type. <a href="https://doc.rust-lang.org/nightly/core/ops/drop/trait.Drop.html#tymethod.drop">Read more</a></div></details></div></details></div><h2 id="synthetic-implementations" class="section-header">Auto Trait Implementations<a href="#synthetic-implementations" class="anchor">§</a></h2><div id="synthetic-implementations-list"><section id="impl-Freeze-for-Grammar" class="impl"><a href="#impl-Freeze-for-Grammar" class="anchor">§</a><h3 class="code-header">impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Freeze.html" title="trait core::marker::Freeze">Freeze</a> for <a class="struct" href="struct.Grammar.html" title="struct xgrammar::Grammar">Grammar</a></h3></section><section id="impl-RefUnwindSafe-for-Grammar" class="impl"><a href="#impl-RefUnwindSafe-for-Grammar" class="anchor">§</a><h3 class="code-header">impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/panic/unwind_safe/trait.RefUnwindSafe.html" title="trait core::panic::unwind_safe::RefUnwindSafe">RefUnwindSafe</a> for <a class="struct" href="struct.Grammar.html" title="struct xgrammar::Grammar">Grammar</a></h3></section><section id="impl-Send-for-Grammar" class="impl"><a href="#impl-Send-for-Grammar" class="anchor">§</a><h3 class="code-header">impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Send.html" title="trait core::marker::Send">Send</a> for <a class="struct" href="struct.Grammar.html" title="struct xgrammar::Grammar">Grammar</a></h3></section><section id="impl-Sync-for-Grammar" class="impl"><a href="#impl-Sync-for-Grammar" class="anchor">§</a><h3 class="code-header">impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sync.html" title="trait core::marker::Sync">Sync</a> for <a class="struct" href="struct.Grammar.html" title="struct xgrammar::Grammar">Grammar</a></h3></section><section id="impl-Unpin-for-Grammar" class="impl"><a href="#impl-Unpin-for-Grammar" class="anchor">§</a><h3 class="code-header">impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Unpin.html" title="trait core::marker::Unpin">Unpin</a> for <a class="struct" href="struct.Grammar.html" title="struct xgrammar::Grammar">Grammar</a></h3></section><section id="impl-UnwindSafe-for-Grammar" class="impl"><a href="#impl-UnwindSafe-for-Grammar" class="anchor">§</a><h3 class="code-header">impl <a class="trait" href="https://doc.rust-lang.org/nightly/core/panic/unwind_safe/trait.UnwindSafe.html" title="trait core::panic::unwind_safe::UnwindSafe">UnwindSafe</a> for <a class="struct" href="struct.Grammar.html" title="struct xgrammar::Grammar">Grammar</a></h3></section></div><h2 id="blanket-implementations" class="section-header">Blanket Implementations<a href="#blanket-implementations" class="anchor">§</a></h2><div id="blanket-implementations-list"><details class="toggle implementors-toggle"><summary><section id="impl-Any-for-T" class="impl"><a class="src rightside" href="https://doc.rust-lang.org/nightly/src/core/any.rs.html#138">Source</a><a href="#impl-Any-for-T" class="anchor">§</a><h3 class="code-header">impl&lt;T&gt; <a class="trait" href="https://doc.rust-lang.org/nightly/core/any/trait.Any.html" title="trait core::any::Any">Any</a> for T<div class="where">where
     T: 'static + ?<a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html" title="trait core::marker::Sized">Sized</a>,</div></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.type_id" class="method trait-impl"><a class="src rightside" href="https://doc.rust-lang.org/nightly/src/core/any.rs.html#139">Source</a><a href="#method.type_id" class="anchor">§</a><h4 class="code-header">fn <a href="https://doc.rust-lang.org/nightly/core/any/trait.Any.html#tymethod.type_id" class="fn">type_id</a>(&amp;self) -&gt; <a class="struct" href="https://doc.rust-lang.org/nightly/core/any/struct.TypeId.html" title="struct core::any::TypeId">TypeId</a></h4></section></summary><div class='docblock'>Gets the <code>TypeId</code> of <code>self</code>. <a href="https://doc.rust-lang.org/nightly/core/any/trait.Any.html#tymethod.type_id">Read more</a></div></details></div></details><details class="toggle implementors-toggle"><summary><section id="impl-Borrow%3CT%3E-for-T" class="impl"><a class="src rightside" href="https://doc.rust-lang.org/nightly/src/core/borrow.rs.html#209">Source</a><a href="#impl-Borrow%3CT%3E-for-T" class="anchor">§</a><h3 class="code-header">impl&lt;T&gt; <a class="trait" href="https://doc.rust-lang.org/nightly/core/borrow/trait.Borrow.html" title="trait core::borrow::Borrow">Borrow</a>&lt;T&gt; for T<div class="where">where
     T: ?<a class="trait" href="https://doc.rust-lang.org/nightly/core/marker/trait.Sized.html" title="trait core::marker::Sized">Sized</a>,</div></h3></section></summary><div class="impl-items"><details class="toggle method-toggle" open><summary><section id="method.borrow" class="method trait-impl"><a class="src rightside" href="https://doc.rust-lang.org/nightly/src/core/borrow.rs.html#211">Source</a><a href="#method.borrow" class="anchor">§</a><h4 class="code-header">fn <a href="https://doc.rust-lang.org/nightly/core/borrow/trait.Borrow.html#tymethod.borrow" class="fn">borrow</a>(&amp;self) -&gt; <a class="primitive" href="https://doc.rust-lang.org/nightly/std/primitive.reference.html">&amp;T</a></h4></section></summary><div class='docblock'>Immutably borrows from an owned value. <a href="https://doc.rust-lang.org/nightly/core/borrow/trait.Borrow.html#tymethod.borrow">Read more</a></div></details></div></details><details class="toggle implementors-toggle"><summary><section id="impl-BorrowMut%3CT%3E-for-T" class="impl"><a class="src rightside" href="https://doc.rust-lang.org/nightly/src/core/borrow.rs.html#217">Source</a><a href="#impl-BorrowMut%3CT%3E-for-T" class="anchor">§</a><h3 class="code-header">impl&lt;T&gt; <a class="trait" href="https://doc.rust-lang.org/nightly/core/borrow/trait.BorrowMut.html" title="trait core::borrow::BorrowMut">BorrowMut</a>&lt;T&gt; for T<div class="where">where
