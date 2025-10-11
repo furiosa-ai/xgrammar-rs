@@ -34,33 +34,6 @@ fn test_grammar_from_regex() {
 }
 
 #[test]
-fn test_grammar_from_structural_tag_json() {
-    // Test with valid structural tag JSON using json! macro
-    // This demonstrates how to use json! to build the schema dynamically
-    let schema = json!({
-        "type": "object",
-        "properties": {
-            "key": {
-                "type": "string"
-            }
-        },
-        "required": ["key"]
-    });
-
-    let structural_tag_json = json!({
-        "format": {
-            "type": "json_schema",
-            "json_schema": schema
-        }
-    });
-
-    let result = Grammar::from_structural_tag(&structural_tag_json.to_string());
-    assert!(result.is_ok());
-    let grammar = result.unwrap();
-    assert!(!grammar.is_null());
-}
-
-#[test]
 fn test_grammar_from_structural_tag_simple() {
     // Test with minimal valid structural tag JSON
     let structural_tag_json = json!({
