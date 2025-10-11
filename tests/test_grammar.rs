@@ -1,5 +1,6 @@
 mod common;
 
+use serde_json::json;
 use xgrammar::Grammar;
 
 #[test]
@@ -13,14 +14,15 @@ fn test_grammar_from_ebnf() {
 
 #[test]
 fn test_grammar_from_json_schema() {
-    let schema = r#"{
+    let schema = json!({
         "type": "object",
         "properties": {
             "name": {"type": "string"},
             "age": {"type": "integer"}
         }
-    }"#;
-    let grammar = Grammar::from_json_schema(schema, None, None, None, None, None);
+    });
+    let grammar =
+        Grammar::from_json_schema(&schema.to_string(), None, None, None, None, None, None);
     assert!(!grammar.is_null());
 }
 
@@ -33,15 +35,42 @@ fn test_grammar_from_regex() {
 
 #[test]
 fn test_grammar_from_structural_tag_json() {
-    // Test with valid structural tag JSON
-    let valid_json = r#"{
+    // Test with valid structural tag JSON using json! macro
+    // This demonstrates how to use json! to build the schema dynamically
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "key": {
+                "type": "string"
+            }
+        },
+        "required": ["key"]
+    });
+
+    let structural_tag_json = json!({
+        "format": {
+            "type": "json_schema",
+            "json_schema": schema
+        }
+    });
+
+    let result = Grammar::from_structural_tag(&structural_tag_json.to_string());
+    assert!(result.is_ok());
+    let grammar = result.unwrap();
+    assert!(!grammar.is_null());
+}
+
+#[test]
+fn test_grammar_from_structural_tag_simple() {
+    // Test with minimal valid structural tag JSON
+    let structural_tag_json = json!({
         "format": {
             "type": "json_schema",
             "json_schema": {}
         }
-    }"#;
+    });
 
-    let result = Grammar::from_structural_tag(valid_json);
+    let result = Grammar::from_structural_tag(&structural_tag_json.to_string());
     assert!(result.is_ok());
     let grammar = result.unwrap();
     assert!(!grammar.is_null());
@@ -59,9 +88,11 @@ fn test_from_structural_tag_errors() {
         assert!(err_msg.contains("Failed to parse JSON"));
     }
 
-    // Test 2: Missing format field
-    let missing_format = r#"{"type": "structural_tag"}"#;
-    let result = Grammar::from_structural_tag(missing_format);
+    // Test 2: Missing format field using json! macro
+    let missing_format = json!({
+        "type": "structural_tag"
+    });
+    let result = Grammar::from_structural_tag(&missing_format.to_string());
     assert!(result.is_err());
     if let Err(err) = result {
         let err_msg = err.to_string();
@@ -69,26 +100,26 @@ fn test_from_structural_tag_errors() {
         assert!(err_msg.contains("Structural tag must have a format field"));
     }
 
-    // Test 3: Invalid format type
-    let invalid_format_type = r#"{
+    // Test 3: Invalid format type using json! macro
+    let invalid_format_type = json!({
         "format": {
             "type": "invalid_type"
         }
-    }"#;
-    let result = Grammar::from_structural_tag(invalid_format_type);
+    });
+    let result = Grammar::from_structural_tag(&invalid_format_type.to_string());
     assert!(result.is_err());
     if let Err(err) = result {
         let err_msg = err.to_string();
         assert!(err_msg.contains("invalid structural tag"));
     }
 
-    // Test 4: Missing json_schema field in json_schema format
-    let missing_json_schema = r#"{
+    // Test 4: Missing json_schema field in json_schema format using json! macro
+    let missing_json_schema = json!({
         "format": {
             "type": "json_schema"
         }
-    }"#;
-    let result = Grammar::from_structural_tag(missing_json_schema);
+    });
+    let result = Grammar::from_structural_tag(&missing_json_schema.to_string());
     assert!(result.is_err());
     if let Err(err) = result {
         let err_msg = err.to_string();

@@ -402,6 +402,7 @@ impl GrammarCompiler {
     /// * `indent` - Optional indentation level
     /// * `separators` - Optional custom separators (object_separator, array_separator)
     /// * `strict_mode` - Whether to use strict mode (default: true)
+    /// * `max_whitespace_cnt` - Optional maximum number of whitespace characters allowed
     ///
     /// # Returns
     /// * A compiled grammar that can be used with GrammarMatcher
@@ -412,6 +413,7 @@ impl GrammarCompiler {
         indent: Option<i32>,
         separators: Option<(String, String)>,
         strict_mode: Option<bool>,
+        max_whitespace_cnt: Option<i32>,
     ) -> CompiledGrammar {
         let schema_cstring = CString::new(schema).expect("Failed to convert schema to CString");
         let schema_ptr = schema_cstring.as_ptr();
@@ -420,6 +422,8 @@ impl GrammarCompiler {
         let has_indent = indent.is_some();
         let indent_value = indent.unwrap_or(0);
         let has_separators = separators.is_some();
+        let has_max_whitespace_cnt = max_whitespace_cnt.is_some();
+        let max_whitespace_cnt_value = max_whitespace_cnt.unwrap_or(0);
 
         let (_obj_sep_cstring, _array_sep_cstring, obj_sep_ptr, array_sep_ptr) =
             if let Some((obj_sep, array_sep)) = separators {
@@ -443,7 +447,9 @@ impl GrammarCompiler {
             has_separators as "bool",
             obj_sep_ptr as "const char*",
             array_sep_ptr as "const char*",
-            strict_mode as "bool"
+            strict_mode as "bool",
+            has_max_whitespace_cnt as "bool",
+            max_whitespace_cnt_value as "int"
         ] -> CompiledGrammar as "xgrammar::CompiledGrammar" {
             std::string schema_str(schema_ptr);
             std::optional<int> opt_indent = has_indent ? std::make_optional(indent_value) : std::nullopt;
@@ -455,7 +461,9 @@ impl GrammarCompiler {
                 opt_separators = std::nullopt;
             }
 
-            return self->CompileJSONSchema(schema_str, any_whitespace, opt_indent, opt_separators, strict_mode);
+            std::optional<int> opt_max_whitespace_cnt = has_max_whitespace_cnt ? std::make_optional(max_whitespace_cnt_value) : std::nullopt;
+
+            return self->CompileJSONSchema(schema_str, any_whitespace, opt_indent, opt_separators, strict_mode, opt_max_whitespace_cnt);
         })
     }
 
@@ -564,12 +572,25 @@ impl Grammar {
     }
 
     /// Construct a BNF grammar from the json schema string.
+    ///
+    /// # Arguments
+    /// * `schema` - The JSON schema string
+    /// * `any_whitespace` - Whether to allow any whitespace in the JSON. Default: true
+    /// * `indent` - The number of spaces for indentation. If None, no indentation is applied
+    /// * `separators` - Custom separators for JSON formatting as (object_separator, array_separator)
+    /// * `strict_mode` - Whether to use strict mode for JSON schema validation. Default: true
+    /// * `max_whitespace_cnt` - Maximum number of consecutive whitespace characters allowed. If None, no limit is applied
+    /// * `print_converted_ebnf` - Whether to print the converted EBNF grammar. Default: false
+    ///
+    /// # Returns
+    /// * A Grammar constructed from the JSON schema
     pub fn from_json_schema(
         schema: &str,
         any_whitespace: Option<bool>,
         indent: Option<i32>,
         separators: Option<(String, String)>,
         strict_mode: Option<bool>,
+        max_whitespace_cnt: Option<i32>,
         print_converted_ebnf: Option<bool>,
     ) -> Self {
         let schema_cstring = CString::new(schema).expect("Failed to convert schema to CString");
@@ -580,6 +601,8 @@ impl Grammar {
         let has_indent = indent.is_some();
         let indent_value = indent.unwrap_or(0);
         let has_separators = separators.is_some();
+        let has_max_whitespace_cnt = max_whitespace_cnt.is_some();
+        let max_whitespace_cnt_value = max_whitespace_cnt.unwrap_or(0);
 
         let (_obj_sep_cstring, _array_sep_cstring, obj_sep_ptr, array_sep_ptr) =
             if let Some((obj_sep, array_sep)) = separators {
@@ -603,6 +626,8 @@ impl Grammar {
             obj_sep_ptr as "const char*",
             array_sep_ptr as "const char*",
             strict_mode as "bool",
+            has_max_whitespace_cnt as "bool",
+            max_whitespace_cnt_value as "int",
             print_converted_ebnf as "bool"
         ] -> Grammar as "xgrammar::Grammar" {
             std::string schema_str(schema_ptr);
@@ -615,12 +640,15 @@ impl Grammar {
                 opt_separators = std::nullopt;
             }
 
+            std::optional<int> opt_max_whitespace_cnt = has_max_whitespace_cnt ? std::make_optional(max_whitespace_cnt_value) : std::nullopt;
+
             return xgrammar::Grammar::FromJSONSchema(
                 schema_str,
                 any_whitespace,
                 opt_indent,
                 opt_separators,
                 strict_mode,
+                opt_max_whitespace_cnt,
                 print_converted_ebnf
             );
         })

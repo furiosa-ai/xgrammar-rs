@@ -1,5 +1,6 @@
 mod common;
 
+use serde_json::json;
 use xgrammar::{GrammarCompiler, TokenizerInfo, VocabType};
 
 const EXAONE_4_0_32B_PRETRAINED_ID: &str = "LGAI-EXAONE/EXAONE-4.0-32B";
@@ -39,8 +40,8 @@ fn test_cache_management() {
     let _grammar2 = compiler.compile_regex(r"\d+");
     let cache_size_after_regex = compiler.get_cache_size_bytes();
 
-    let schema = r#"{"type": "object", "properties": {"name": {"type": "string"}}}"#;
-    let _grammar3 = compiler.compile_json_schema(schema, None, None, None, None);
+    let schema = json!({"type": "object", "properties": {"name": {"type": "string"}}});
+    let _grammar3 = compiler.compile_json_schema(&schema.to_string(), None, None, None, None, None);
     let cache_size_after_schema = compiler.get_cache_size_bytes();
 
     println!("Cache size after JSON grammar: {} bytes", cache_size_after_json);
@@ -97,40 +98,43 @@ fn test_compile_json_schema() {
     let compiler = GrammarCompiler::new(&tok_info);
 
     // Test with a simple JSON schema
-    let schema = r#"{
+    let schema = json!({
         "type": "object",
         "properties": {
             "name": {"type": "string"},
             "age": {"type": "integer", "minimum": 0}
         },
         "required": ["name", "age"]
-    }"#;
+    });
 
     // Test with default parameters
-    let compiled_grammar = compiler.compile_json_schema(schema, None, None, None, None);
+    let compiled_grammar =
+        compiler.compile_json_schema(&schema.to_string(), None, None, None, None, None);
     assert!(compiled_grammar.memory_size_bytes() > 0);
     assert_eq!(compiled_grammar.get_tokenizer_info().get_vocab_size(), 102400);
     assert_eq!(compiled_grammar.get_tokenizer_info().get_vocab_type(), VocabType::ByteLevel);
 
     // Test with custom parameters
     let compiled_grammar_custom = compiler.compile_json_schema(
-        schema,
+        &schema.to_string(),
         Some(false),
         Some(2),
         Some((":".to_string(), ",".to_string())),
         Some(true),
+        None,
     );
     assert!(compiled_grammar_custom.memory_size_bytes() > 0);
 
     // Test with a different schema (array type)
-    let array_schema = r#"{
+    let array_schema = json!({
         "type": "array",
         "items": {"type": "string"},
         "minItems": 1,
         "maxItems": 3
-    }"#;
+    });
 
-    let array_compiled = compiler.compile_json_schema(array_schema, None, None, None, None);
+    let array_compiled =
+        compiler.compile_json_schema(&array_schema.to_string(), None, None, None, None, None);
     assert!(array_compiled.memory_size_bytes() > 0);
 }
 
