@@ -1,6 +1,6 @@
 mod common;
 
-use xgrammar::{GrammarCompiler, StructuralTagItem, TokenizerInfo, VocabType};
+use xgrammar::{GrammarCompiler, TokenizerInfo, VocabType};
 
 const EXAONE_4_0_32B_PRETRAINED_ID: &str = "LGAI-EXAONE/EXAONE-4.0-32B";
 
@@ -163,23 +163,21 @@ fn test_compile_structural_tag() {
         .expect("Failed to load tokenizer info");
     let compiler = GrammarCompiler::new(&tok_info);
 
-    // Test with simple structural tags
-    let tags = vec![
-        StructuralTagItem::new(
-            "<question>".to_string(),
-            r#"{"type": "string"}"#.to_string(),
-            "</question>".to_string(),
-        ),
-        StructuralTagItem::new(
-            "<answer>".to_string(),
-            r#"{"type": "object", "properties": {"result": {"type": "string"}}}"#.to_string(),
-            "</answer>".to_string(),
-        ),
-    ];
+    // Test with simple structural tag JSON
+    let structural_tag_json = r#"{
+        "format": {
+            "type": "json_schema",
+            "json_schema": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string"},
+                    "answer": {"type": "string"}
+                }
+            }
+        }
+    }"#;
 
-    let triggers = vec!["<question>".to_string(), "<answer>".to_string()];
-
-    let compiled_grammar = compiler.compile_structural_tag(&tags, &triggers);
+    let compiled_grammar = compiler.compile_structural_tag(structural_tag_json);
     assert!(compiled_grammar.memory_size_bytes() > 0);
 }
 
@@ -189,11 +187,11 @@ fn test_compile_structural_tag_complex() {
         .expect("Failed to load tokenizer info");
     let compiler = GrammarCompiler::new(&tok_info);
 
-    // Test with more complex structural tags
-    let tags = vec![
-        StructuralTagItem::new(
-            "```json".to_string(),
-            r#"{
+    // Test with more complex structural tag JSON
+    let structural_tag_json = r#"{
+        "format": {
+            "type": "json_schema",
+            "json_schema": {
                 "type": "object",
                 "properties": {
                     "name": {"type": "string", "minLength": 1},
@@ -204,34 +202,29 @@ fn test_compile_structural_tag_complex() {
                     }
                 },
                 "required": ["name", "age"]
-            }"#
-            .to_string(),
-            "```".to_string(),
-        ),
-        StructuralTagItem::new(
-            "```xml".to_string(),
-            r#"{"type": "string", "pattern": "^<[^>]+>.*</[^>]+>$"}"#.to_string(),
-            "```".to_string(),
-        ),
-    ];
+            }
+        }
+    }"#;
 
-    let triggers = vec!["```json".to_string(), "```xml".to_string()];
-
-    let compiled_grammar = compiler.compile_structural_tag(&tags, &triggers);
+    let compiled_grammar = compiler.compile_structural_tag(structural_tag_json);
     assert!(compiled_grammar.memory_size_bytes() > 0);
 }
 
 #[test]
-fn test_compile_structural_tag_empty() {
+fn test_compile_structural_tag_minimal() {
     let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
         .expect("Failed to load tokenizer info");
     let compiler = GrammarCompiler::new(&tok_info);
 
-    // Test with empty tags and triggers
-    let tags: Vec<StructuralTagItem> = vec![];
-    let triggers: Vec<String> = vec![];
+    // Test with minimal structural tag JSON (empty object schema)
+    let structural_tag_json = r#"{
+        "format": {
+            "type": "json_schema",
+            "json_schema": {}
+        }
+    }"#;
 
-    let compiled_grammar = compiler.compile_structural_tag(&tags, &triggers);
+    let compiled_grammar = compiler.compile_structural_tag(structural_tag_json);
     // Should not crash, and should have some memory usage
     let _memory_size = compiled_grammar.memory_size_bytes(); // Just verify it doesn't crash
 }

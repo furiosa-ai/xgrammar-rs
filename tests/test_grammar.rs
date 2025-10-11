@@ -1,6 +1,6 @@
 mod common;
 
-use xgrammar::{Grammar, StructuralTagItem};
+use xgrammar::Grammar;
 
 #[test]
 fn test_grammar_from_ebnf() {
@@ -32,15 +32,69 @@ fn test_grammar_from_regex() {
 }
 
 #[test]
-fn test_grammar_from_structural_tag() {
-    let tags = vec![StructuralTagItem::new(
-        "<start>".to_string(),
-        r#"{"type": "string"}"#.to_string(),
-        "<end>".to_string(),
-    )];
-    let triggers = vec!["<start>".to_string()];
-    let grammar = Grammar::from_structural_tag(&tags, &triggers);
+fn test_grammar_from_structural_tag_json() {
+    // Test with valid structural tag JSON
+    let valid_json = r#"{
+        "format": {
+            "type": "json_schema",
+            "json_schema": {}
+        }
+    }"#;
+
+    let result = Grammar::from_structural_tag(valid_json);
+    assert!(result.is_ok());
+    let grammar = result.unwrap();
     assert!(!grammar.is_null());
+}
+
+#[test]
+fn test_from_structural_tag_errors() {
+    // Test 1: Invalid JSON syntax
+    let invalid_json = "not a json";
+    let result = Grammar::from_structural_tag(invalid_json);
+    assert!(result.is_err());
+    if let Err(err) = result {
+        let err_msg = err.to_string();
+        assert!(err_msg.contains("Invalid JSON error"));
+        assert!(err_msg.contains("Failed to parse JSON"));
+    }
+
+    // Test 2: Missing format field
+    let missing_format = r#"{"type": "structural_tag"}"#;
+    let result = Grammar::from_structural_tag(missing_format);
+    assert!(result.is_err());
+    if let Err(err) = result {
+        let err_msg = err.to_string();
+        assert!(err_msg.contains("Invalid structural tag error"));
+        assert!(err_msg.contains("Structural tag must have a format field"));
+    }
+
+    // Test 3: Invalid format type
+    let invalid_format_type = r#"{
+        "format": {
+            "type": "invalid_type"
+        }
+    }"#;
+    let result = Grammar::from_structural_tag(invalid_format_type);
+    assert!(result.is_err());
+    if let Err(err) = result {
+        let err_msg = err.to_string();
+        assert!(err_msg.contains("invalid structural tag"));
+    }
+
+    // Test 4: Missing json_schema field in json_schema format
+    let missing_json_schema = r#"{
+        "format": {
+            "type": "json_schema"
+        }
+    }"#;
+    let result = Grammar::from_structural_tag(missing_json_schema);
+    assert!(result.is_err());
+    if let Err(err) = result {
+        let err_msg = err.to_string();
+        assert!(err_msg.contains("Invalid structural tag error"));
+        assert!(err_msg.contains("JSON schema format must have a json_schema field"));
+    }
 }
 
 #[test]

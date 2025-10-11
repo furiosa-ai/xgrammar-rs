@@ -507,91 +507,39 @@ impl GrammarCompiler {
         })
     }
 
-    /// Utility function to extract a specific field from StructuralTagItems and convert to CStrings
-    fn extract_field_to_cstring_ptrs<F>(
-        tags: &[StructuralTagItem],
-        field_extractor: F,
-    ) -> (Vec<CString>, Vec<*const i8>)
-    where
-        F: Fn(&StructuralTagItem) -> &str,
-    {
-        let cstrings: Vec<CString> = tags
-            .iter()
-            .map(|tag| {
-                CString::new(field_extractor(tag)).expect("Failed to convert field to CString")
-            })
-            .collect();
-        let ptrs: Vec<*const i8> = cstrings.iter().map(|cs| cs.as_ptr()).collect();
-        (cstrings, ptrs)
-    }
-
-    /// Utility function to convert a slice of strings to CStrings and their pointers
-    fn strings_to_cstring_ptrs(strings: &[String]) -> (Vec<CString>, Vec<*const i8>) {
-        let cstrings: Vec<CString> = strings
-            .iter()
-            .map(|s| CString::new(s.as_str()).expect("Failed to convert string to CString"))
-            .collect();
-        let ptrs: Vec<*const i8> = cstrings.iter().map(|cs| cs.as_ptr()).collect();
-        (cstrings, ptrs)
-    }
-
-    /// Get the compiled grammar for structural tags.
+    /// Compile a grammar from a structural tag JSON string.
+    ///
+    /// This method compiles a structural tag specification provided as a JSON string into
+    /// a grammar that can be used with a GrammarMatcher. The structural tag allows for
+    /// structured text generation with specific formatting tags and schemas.
     ///
     /// # Arguments
-    /// * `tags` - Vector of structural tag items, each containing begin, schema, and end components
-    /// * `triggers` - Vector of trigger strings
+    /// * `structural_tag_json` - A JSON string specifying the structural tag configuration.
+    ///   The JSON should contain the structural tag items and triggers.
     ///
     /// # Returns
     /// * A compiled grammar that can be used with GrammarMatcher
-    pub fn compile_structural_tag(
-        &self,
-        tags: &[StructuralTagItem],
-        triggers: &[String],
-    ) -> CompiledGrammar {
-        // Convert Rust data to C++ format using utility functions
-        let (_begin_cstrings, tag_begin_ptrs) =
-            Self::extract_field_to_cstring_ptrs(tags, |tag| &tag.begin);
-        let (_schema_cstrings, tag_schema_ptrs) =
-            Self::extract_field_to_cstring_ptrs(tags, |tag| &tag.schema);
-        let (_end_cstrings, tag_end_ptrs) =
-            Self::extract_field_to_cstring_ptrs(tags, |tag| &tag.end);
-        let (_trigger_cstrings, trigger_ptrs) = Self::strings_to_cstring_ptrs(triggers);
-
-        let num_tags = tags.len();
-        let num_triggers = triggers.len();
-
-        let tag_begin_ptrs_ptr = tag_begin_ptrs.as_ptr();
-        let tag_schema_ptrs_ptr = tag_schema_ptrs.as_ptr();
-        let tag_end_ptrs_ptr = tag_end_ptrs.as_ptr();
-        let trigger_ptrs_ptr = trigger_ptrs.as_ptr();
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use xgrammar_rs::{GrammarCompiler, TokenizerInfo};
+    /// # fn example(tokenizer_info: &TokenizerInfo) {
+    /// let compiler = GrammarCompiler::new(tokenizer_info);
+    /// let structural_tag_json = r#"{"tags": [{"begin": "<start>", "schema": "{}", "end": "</start>"}], "triggers": ["trigger1"]}"#;
+    /// let compiled_grammar = compiler.compile_structural_tag(structural_tag_json);
+    /// # }
+    /// ```
+    pub fn compile_structural_tag(&self, structural_tag_json: &str) -> CompiledGrammar {
+        let structural_tag_json_cstring = CString::new(structural_tag_json)
+            .expect("Failed to convert structural_tag_json to CString");
+        let structural_tag_json_ptr = structural_tag_json_cstring.as_ptr();
 
         cpp!(unsafe [
             self as "xgrammar::GrammarCompiler*",
-            tag_begin_ptrs_ptr as "const char* const*",
-            tag_schema_ptrs_ptr as "const char* const*",
-            tag_end_ptrs_ptr as "const char* const*",
-            num_tags as "size_t",
-            trigger_ptrs_ptr as "const char* const*",
-            num_triggers as "size_t"
+            structural_tag_json_ptr as "const char*"
         ] -> CompiledGrammar as "xgrammar::CompiledGrammar" {
-            std::vector<xgrammar::StructuralTagItem> tags_vector;
-            tags_vector.reserve(num_tags);
-
-            for (size_t i = 0; i < num_tags; ++i) {
-                tags_vector.emplace_back(xgrammar::StructuralTagItem{
-                    std::string(tag_begin_ptrs_ptr[i]),
-                    std::string(tag_schema_ptrs_ptr[i]),
-                    std::string(tag_end_ptrs_ptr[i])
-                });
-            }
-
-            std::vector<std::string> triggers_vector;
-            triggers_vector.reserve(num_triggers);
-            for (size_t i = 0; i < num_triggers; ++i) {
-                triggers_vector.emplace_back(std::string(trigger_ptrs_ptr[i]));
-            }
-
-            return self->CompileStructuralTag(tags_vector, triggers_vector);
+            std::string structural_tag_json_str(structural_tag_json_ptr);
+            return self->CompileStructuralTag(structural_tag_json_str);
         })
     }
 }
@@ -692,51 +640,76 @@ impl Grammar {
         })
     }
 
-    /// Construct a grammar from a structural tag.
-    pub fn from_structural_tag(tags: &[StructuralTagItem], triggers: &[String]) -> Self {
-        let (_begin_cstrings, tag_begin_ptrs) =
-            GrammarCompiler::extract_field_to_cstring_ptrs(tags, |tag| &tag.begin);
-        let (_schema_cstrings, tag_schema_ptrs) =
-            GrammarCompiler::extract_field_to_cstring_ptrs(tags, |tag| &tag.schema);
-        let (_end_cstrings, tag_end_ptrs) =
-            GrammarCompiler::extract_field_to_cstring_ptrs(tags, |tag| &tag.end);
-        let (_trigger_cstrings, trigger_ptrs) = GrammarCompiler::strings_to_cstring_ptrs(triggers);
+    /// Construct a grammar from a structural tag JSON string.
+    ///
+    /// This method parses a JSON string containing structural tag configuration
+    /// and creates a grammar from it. The JSON should specify the structural
+    /// tag items and triggers.
+    ///
+    /// # Arguments
+    /// * `structural_tag_json` - A JSON string specifying the structural tag configuration
+    ///
+    /// # Returns
+    /// * `Ok(Grammar)` if the JSON is valid and the grammar was successfully created
+    /// * `Err(XGrammarErr)` if the JSON is invalid or the structural tag is malformed
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use xgrammar_rs::Grammar;
+    /// let structural_tag_json = r#"{"tags": [{"begin": "<start>", "schema": "{}", "end": "</start>"}], "triggers": ["trigger1"]}"#;
+    /// let grammar = Grammar::from_structural_tag(structural_tag_json).unwrap();
+    /// ```
+    pub fn from_structural_tag(structural_tag_json: &str) -> Result<Self> {
+        let structural_tag_json_cstring = CString::new(structural_tag_json)
+            .expect("Failed to convert structural_tag_json to CString");
+        let structural_tag_json_ptr = structural_tag_json_cstring.as_ptr();
 
-        let num_tags = tags.len();
-        let num_triggers = triggers.len();
+        // We use separate variables to capture success flag and error message
+        let mut success: i32 = 0;
+        let mut error_msg_ptr: *mut std::os::raw::c_char = std::ptr::null_mut();
 
-        let tag_begin_ptrs_ptr = tag_begin_ptrs.as_ptr();
-        let tag_schema_ptrs_ptr = tag_schema_ptrs.as_ptr();
-        let tag_end_ptrs_ptr = tag_end_ptrs.as_ptr();
-        let trigger_ptrs_ptr = trigger_ptrs.as_ptr();
-
-        cpp!(unsafe [
-            tag_begin_ptrs_ptr as "const char* const*",
-            tag_schema_ptrs_ptr as "const char* const*",
-            tag_end_ptrs_ptr as "const char* const*",
-            num_tags as "size_t",
-            trigger_ptrs_ptr as "const char* const*",
-            num_triggers as "size_t"
+        let grammar = cpp!(unsafe [
+            structural_tag_json_ptr as "const char*",
+            mut success as "int",
+            mut error_msg_ptr as "char*"
         ] -> Grammar as "xgrammar::Grammar" {
-            std::vector<xgrammar::StructuralTagItem> tags_vector;
-            tags_vector.reserve(num_tags);
+            std::string structural_tag_json_str(structural_tag_json_ptr);
+            auto result = xgrammar::Grammar::FromStructuralTag(structural_tag_json_str);
 
-            for (size_t i = 0; i < num_tags; ++i) {
-                tags_vector.emplace_back(xgrammar::StructuralTagItem{
-                    std::string(tag_begin_ptrs_ptr[i]),
-                    std::string(tag_schema_ptrs_ptr[i]),
-                    std::string(tag_end_ptrs_ptr[i])
-                });
+            // Check if result holds a Grammar or an error
+            if (std::holds_alternative<xgrammar::Grammar>(result)) {
+                success = 1;
+                error_msg_ptr = nullptr;
+                return std::get<xgrammar::Grammar>(result);
+            } else {
+                success = 0;
+                auto error = std::get<xgrammar::StructuralTagError>(result);
+
+                // Extract error message from the variant
+                std::string error_msg;
+                std::visit([&error_msg](auto&& err) {
+                    error_msg = err.what();
+                }, error);
+
+                // Allocate and copy error message
+                error_msg_ptr = strdup(error_msg.c_str());
+
+                // Return a null grammar
+                return xgrammar::Grammar(xgrammar::NullObj{});
             }
+        });
 
-            std::vector<std::string> triggers_vector;
-            triggers_vector.reserve(num_triggers);
-            for (size_t i = 0; i < num_triggers; ++i) {
-                triggers_vector.emplace_back(std::string(trigger_ptrs_ptr[i]));
-            }
-
-            return xgrammar::Grammar::FromStructuralTag(tags_vector, triggers_vector);
-        })
+        if success == 1 {
+            Ok(grammar)
+        } else {
+            let error_msg = if !error_msg_ptr.is_null() {
+                let c_str = unsafe { CString::from_raw(error_msg_ptr) };
+                c_str.to_string_lossy().into_owned()
+            } else {
+                "Unknown error".to_string()
+            };
+            Err(XGrammarErr::InvalidStructuralTag(error_msg))
+        }
     }
 
     /// Get the grammar of standard JSON format.
