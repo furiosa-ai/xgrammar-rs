@@ -326,24 +326,33 @@ impl CompiledGrammar {
 //  We should add error handling in application layer.
 impl GrammarCompiler {
     /// Create a new GrammarCompiler with default parameters.
+    ///
+    /// The GrammarCompiler is a grammar compilation utility that compiles various types of
+    /// grammars into CompiledGrammar objects. It is associated with a specific tokenizer
+    /// and supports caching of grammar compilation results.
+    ///
     /// # Arguments
     /// * `tokenizer_info` - The tokenizer info to use for the grammar compiler
     ///
     /// # Returns
-    /// * A new GrammarCompiler instance
+    /// * A new GrammarCompiler instance with default settings (max_threads: 1, cache enabled)
     pub fn new(tokenizer_info: &TokenizerInfo) -> Self {
         Self::with(tokenizer_info, None, None, None)
     }
 
     /// Create a new GrammarCompiler with custom parameters.
+    ///
+    /// This allows fine-grained control over compilation behavior including thread usage,
+    /// caching, and memory limits.
+    ///
     /// # Arguments
     /// * `tokenizer_info` - The tokenizer info to use for the grammar compiler
-    /// * `max_threads` - The maximum number of threads to use (default: 1)
+    /// * `max_threads` - The maximum number of threads to use for parallel compilation (default: 1)
     /// * `cache_enabled` - Whether to enable caching of compiled grammars (default: true)
-    /// * `max_memory_bytes` - The maximum memory in bytes to use for caching (-1 means unlimited, default: -1)
+    /// * `max_memory_bytes` - The maximum memory in bytes to use for caching. Use None for unlimited.
     ///
     /// # Returns
-    /// * A new GrammarCompiler instance
+    /// * A new GrammarCompiler instance with the specified settings
     pub fn with(
         tokenizer_info: &TokenizerInfo,
         max_threads: Option<usize>,
@@ -371,7 +380,10 @@ impl GrammarCompiler {
         grammar_compiler
     }
 
-    /// Get the compiled grammar for a given grammar.
+    /// Compile a Grammar object into a CompiledGrammar.
+    ///
+    /// This method takes a Grammar object (which can be created from EBNF, JSON schema,
+    /// regex, or structural tags) and compiles it for use with a GrammarMatcher.
     ///
     /// # Arguments
     /// * `grammar` - The grammar to compile
@@ -387,22 +399,31 @@ impl GrammarCompiler {
         })
     }
 
-    /// Get the compiled grammar for pure JSON.
+    /// Compile a grammar for standard JSON format.
+    ///
+    /// This is a convenience method that returns a compiled grammar for parsing
+    /// any valid JSON without schema constraints.
+    ///
+    /// # Returns
+    /// * A compiled grammar that matches standard JSON format
     pub fn compile_builtin_json_grammar(&self) -> CompiledGrammar {
         cpp!(unsafe [self as "xgrammar::GrammarCompiler*"] -> CompiledGrammar as "xgrammar::CompiledGrammar" {
             return self->CompileBuiltinJSONGrammar();
         })
     }
 
-    /// Get the compiled grammar for a JSON schema string.
+    /// Compile a grammar from a JSON schema string.
+    ///
+    /// This method compiles a JSON schema specification into a grammar that enforces
+    /// the schema constraints during text generation.
     ///
     /// # Arguments
     /// * `schema` - The JSON schema string to compile
-    /// * `any_whitespace` - Whether to allow any whitespace (default: true)
-    /// * `indent` - Optional indentation level
-    /// * `separators` - Optional custom separators (object_separator, array_separator)
-    /// * `strict_mode` - Whether to use strict mode (default: true)
-    /// * `max_whitespace_cnt` - Optional maximum number of whitespace characters allowed
+    /// * `any_whitespace` - Whether to allow flexible whitespace in the JSON output. None uses true
+    /// * `indent` - Number of spaces for indentation. None means no indentation
+    /// * `separators` - Custom separators as (object_separator, array_separator), e.g., (":", ","). None uses default separators
+    /// * `strict_mode` - Whether to enforce strict JSON schema validation. None uses true
+    /// * `max_whitespace_cnt` - Maximum number of consecutive whitespace characters allowed. None means no limit
     ///
     /// # Returns
     /// * A compiled grammar that can be used with GrammarMatcher
@@ -467,7 +488,10 @@ impl GrammarCompiler {
         })
     }
 
-    /// Get the compiled grammar for a regex pattern.
+    /// Compile a grammar from a regular expression pattern.
+    ///
+    /// This method compiles a regex pattern into a grammar that matches text
+    /// conforming to the specified pattern.
     ///
     /// # Arguments
     /// * `regex` - The regex pattern string to compile
