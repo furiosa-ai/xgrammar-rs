@@ -19,4 +19,6 @@ pub enum XGrammarErr {
     InvalidVocab(String),
     #[error("invalid structural tag: {0}")]
     InvalidStructuralTag(String),
+    #[error("invalid grammar: {0}")]
+    InvalidGrammar(String),
 }

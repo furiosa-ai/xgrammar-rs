@@ -18,6 +18,7 @@ cpp = "0.5.10"
 dlpark = { version = "0.6.0", features = ["ndarray"] }
 globset = "0.4.16"
 hf-hub = { version = "0.4.3", default-features = false, features = ["ureq"], optional = true }
+libc = "0.2"
 serde_json = "1"
 tempfile = "3.20.0"
 thiserror = "2"

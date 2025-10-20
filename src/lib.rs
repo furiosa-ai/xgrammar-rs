@@ -1,9 +1,11 @@
+#![recursion_limit = "256"]
+
 mod error;
 #[cfg(feature = "hf_hub")]
 pub mod huggingface_hub;
 
 use std::collections::HashMap;
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::path::Path;
 use std::str::FromStr;
 
@@ -41,6 +43,7 @@ impl StructuralTagItem {
 cpp! {{
     #include "xgrammar/xgrammar.h"
     #include <picojson.h>
+    #include <cstring>
 
     using namespace std;
     using namespace xgrammar;
@@ -49,6 +52,12 @@ cpp! {{
     struct MetadataFromHF {
         VocabType vocab_type;
         bool add_prefix_space;
+    };
+
+    struct GrammarResult {
+        bool success;
+        Grammar grammar;
+        char* error_message;
     };
 }}
 
@@ -81,6 +90,13 @@ pub enum VocabType {
 pub struct MetadataFromHF {
     pub vocab_type: VocabType,
     pub add_prefix_space: bool,
+}
+
+#[repr(C)]
+pub struct GrammarResult {
+    pub success: bool,
+    pub grammar: Grammar,
+    pub error_message: *mut std::os::raw::c_char,
 }
 
 pub static HF_CONFIG_FILE: &str = "config.json";
@@ -607,10 +623,13 @@ impl Grammar {
     /// * `root_rule_name` - The name of the root rule to use as the entry point. If None, uses "root"
     ///
     /// # Returns
-    /// * A Grammar object constructed from the EBNF specification
+    /// * `Ok(Grammar)` - A Grammar object constructed from the EBNF specification
+    /// * `Err(XGrammarErr)` - Error if the EBNF string is invalid or malformed
     ///
-    /// # Panics
-    /// * Panics if the EBNF string or root rule name contains null bytes
+    /// # Errors
+    /// * Returns error if the EBNF string contains syntax errors
+    /// * Returns error if the root rule is not defined
+    /// * Returns error if there are undefined rule references
     ///
     /// # Example
     /// ```
@@ -619,10 +638,14 @@ impl Grammar {
     /// root ::= "Hello, " name "!"
     /// name ::= [A-Z][a-z]+
     /// "#;
-    /// let grammar = Grammar::from_ebnf(ebnf, Some("root"));
+    /// let grammar = Grammar::from_ebnf(ebnf, Some("root")).unwrap();
     /// assert!(!grammar.is_null());
+    ///
+    /// // Invalid EBNF will return an error
+    /// let invalid_ebnf = r#"root ::= "unterminated string"#;
+    /// assert!(Grammar::from_ebnf(invalid_ebnf, Some("root")).is_err());
     /// ```
-    pub fn from_ebnf(ebnf_string: &str, root_rule_name: Option<&str>) -> Self {
+    pub fn from_ebnf(ebnf_string: &str, root_rule_name: Option<&str>) -> Result<Self> {
         let ebnf_string_cstring =
             CString::new(ebnf_string).expect("Failed to convert ebnf_string to CString");
         let ebnf_string_ptr = ebnf_string_cstring.as_ptr();
@@ -631,12 +654,28 @@ impl Grammar {
             CString::new(root_rule_name).expect("Failed to convert root_rule_name to CString");
         let root_rule_name_ptr = root_rule_name_cstring.as_ptr();
 
-        cpp!(unsafe [
+        let result = cpp!(unsafe [
             ebnf_string_ptr as "const char*",
             root_rule_name_ptr as "const char*"
-        ] -> Grammar as "xgrammar::Grammar" {
-            return xgrammar::Grammar::FromEBNF(std::string(ebnf_string_ptr), std::string(root_rule_name_ptr));
-        })
+        ] -> GrammarResult as "GrammarResult" {
+            try {
+                auto grammar = Grammar::FromEBNF(string(ebnf_string_ptr), string(root_rule_name_ptr));
+                return {true, grammar, nullptr};
+            } catch (const std::exception& e) {
+                return {false, Grammar(NullObj()), strdup(e.what())};
+            }
+        });
+
+        if result.success {
+            Ok(result.grammar)
+        } else {
+            let error_msg = unsafe {
+                let msg = CStr::from_ptr(result.error_message).to_string_lossy().into_owned();
+                libc::free(result.error_message as *mut libc::c_void);
+                msg
+            };
+            Err(XGrammarErr::InvalidGrammar(error_msg))
+        }
     }
 
     /// Construct a grammar from a JSON schema string.
@@ -660,10 +699,12 @@ impl Grammar {
     /// * `print_converted_ebnf` - Whether to print the converted EBNF grammar for debugging purposes
     ///
     /// # Returns
-    /// * A Grammar object that enforces the JSON schema constraints
+    /// * `Ok(Grammar)` - A Grammar object that enforces the JSON schema constraints
+    /// * `Err(XGrammarErr)` - Error if the JSON schema is invalid or malformed
     ///
-    /// # Panics
-    /// * Panics if the schema string contains null bytes
+    /// # Errors
+    /// * Returns error if the JSON schema is invalid
+    /// * Returns error if the schema cannot be converted to EBNF
     ///
     /// # Example
     /// ```
@@ -684,8 +725,12 @@ impl Grammar {
     ///     Some(true),    // strict mode
     ///     None,          // no whitespace limit
     ///     Some(false)    // don't print EBNF
-    /// );
+    /// ).unwrap();
     /// assert!(!grammar.is_null());
+    ///
+    /// // Invalid JSON schema will return an error
+    /// let invalid_schema = r#"{ invalid json }"#;
+    /// assert!(Grammar::from_json_schema(invalid_schema, None, None, None, None, None, None).is_err());
     /// ```
     pub fn from_json_schema(
         schema: &str,
@@ -695,7 +740,7 @@ impl Grammar {
         strict_mode: Option<bool>,
         max_whitespace_cnt: Option<i32>,
         print_converted_ebnf: Option<bool>,
-    ) -> Self {
+    ) -> Result<Self> {
         let schema_cstring = CString::new(schema).expect("Failed to convert schema to CString");
         let schema_ptr = schema_cstring.as_ptr();
         let any_whitespace = any_whitespace.unwrap_or(true);
@@ -720,7 +765,7 @@ impl Grammar {
                 (None, None, std::ptr::null(), std::ptr::null())
             };
 
-        cpp!(unsafe [
+        let result = cpp!(unsafe [
             schema_ptr as "const char*",
             any_whitespace as "bool",
             has_indent as "bool",
@@ -732,29 +777,45 @@ impl Grammar {
             has_max_whitespace_cnt as "bool",
             max_whitespace_cnt_value as "int",
             print_converted_ebnf as "bool"
-        ] -> Grammar as "xgrammar::Grammar" {
-            std::string schema_str(schema_ptr);
-            std::optional<int> opt_indent = has_indent ? std::make_optional(indent_value) : std::nullopt;
-            std::optional<std::pair<std::string, std::string>> opt_separators;
+        ] -> GrammarResult as "GrammarResult" {
+            try {
+                std::string schema_str(schema_ptr);
+                std::optional<int> opt_indent = has_indent ? std::make_optional(indent_value) : std::nullopt;
+                std::optional<std::pair<std::string, std::string>> opt_separators;
 
-            if (has_separators) {
-                opt_separators = std::make_pair(std::string(obj_sep_ptr), std::string(array_sep_ptr));
-            } else {
-                opt_separators = std::nullopt;
+                if (has_separators) {
+                    opt_separators = std::make_pair(std::string(obj_sep_ptr), std::string(array_sep_ptr));
+                } else {
+                    opt_separators = std::nullopt;
+                }
+
+                std::optional<int> opt_max_whitespace_cnt = has_max_whitespace_cnt ? std::make_optional(max_whitespace_cnt_value) : std::nullopt;
+
+                auto grammar = Grammar::FromJSONSchema(
+                    schema_str,
+                    any_whitespace,
+                    opt_indent,
+                    opt_separators,
+                    strict_mode,
+                    opt_max_whitespace_cnt,
+                    print_converted_ebnf
+                );
+                return {true, grammar, nullptr};
+            } catch (const std::exception& e) {
+                return {false, Grammar(NullObj()), strdup(e.what())};
             }
+        });
 
-            std::optional<int> opt_max_whitespace_cnt = has_max_whitespace_cnt ? std::make_optional(max_whitespace_cnt_value) : std::nullopt;
-
-            return xgrammar::Grammar::FromJSONSchema(
-                schema_str,
-                any_whitespace,
-                opt_indent,
-                opt_separators,
-                strict_mode,
-                opt_max_whitespace_cnt,
-                print_converted_ebnf
-            );
-        })
+        if result.success {
+            Ok(result.grammar)
+        } else {
+            let error_msg = unsafe {
+                let msg = CStr::from_ptr(result.error_message).to_string_lossy().into_owned();
+                libc::free(result.error_message as *mut libc::c_void);
+                msg
+            };
+            Err(XGrammarErr::InvalidGrammar(error_msg))
+        }
     }
 
     /// Construct a grammar from a regular expression string.
@@ -768,29 +829,51 @@ impl Grammar {
     /// * `print_converted_ebnf` - Whether to print the converted EBNF grammar for debugging purposes
     ///
     /// # Returns
-    /// * A Grammar object that matches the regex pattern
+    /// * `Ok(Grammar)` - A Grammar object that matches the regex pattern
+    /// * `Err(XGrammarErr)` - Error if the regex pattern is invalid or malformed
     ///
-    /// # Panics
-    /// * Panics if the regex string contains null bytes
+    /// # Errors
+    /// * Returns error if the regex pattern is invalid
+    /// * Returns error if the regex cannot be converted to EBNF
     ///
     /// # Example
     /// ```
     /// # use xgrammar::Grammar;
     /// // Match email-like patterns
-    /// let grammar = Grammar::from_regex(r"[a-z]+@[a-z]+\.[a-z]+", Some(false));
+    /// let grammar = Grammar::from_regex(r"[a-z]+@[a-z]+\.[a-z]+", Some(false)).unwrap();
     /// assert!(!grammar.is_null());
+    ///
+    /// // Invalid regex will return an error
+    /// let invalid_regex = r"[";
+    /// assert!(Grammar::from_regex(invalid_regex, Some(false)).is_err());
     /// ```
-    pub fn from_regex(regex: &str, print_converted_ebnf: Option<bool>) -> Self {
+    pub fn from_regex(regex: &str, print_converted_ebnf: Option<bool>) -> Result<Self> {
         let regex_cstring = CString::new(regex).expect("Failed to convert regex to CString");
         let regex_ptr = regex_cstring.as_ptr();
         let print_converted_ebnf = print_converted_ebnf.unwrap_or(false);
 
-        cpp!(unsafe [
+        let result = cpp!(unsafe [
             regex_ptr as "const char*",
             print_converted_ebnf as "bool"
-        ] -> Grammar as "xgrammar::Grammar" {
-            return xgrammar::Grammar::FromRegex(std::string(regex_ptr), print_converted_ebnf);
-        })
+        ] -> GrammarResult as "GrammarResult" {
+            try {
+                auto grammar = Grammar::FromRegex(string(regex_ptr), print_converted_ebnf);
+                return {true, grammar, nullptr};
+            } catch (const std::exception& e) {
+                return {false, Grammar(NullObj()), strdup(e.what())};
+            }
+        });
+
+        if result.success {
+            Ok(result.grammar)
+        } else {
+            let error_msg = unsafe {
+                let msg = CStr::from_ptr(result.error_message).to_string_lossy().into_owned();
+                libc::free(result.error_message as *mut libc::c_void);
+                msg
+            };
+            Err(XGrammarErr::InvalidGrammar(error_msg))
+        }
     }
 
     /// Construct a grammar from a structural tag JSON string.
@@ -935,8 +1018,8 @@ impl Grammar {
     /// # Example
     /// ```
     /// # use xgrammar::Grammar;
-    /// let grammar1 = Grammar::from_regex(r"[0-9]+", Some(false));
-    /// let grammar2 = Grammar::from_regex(r"[a-z]+", Some(false));
+    /// let grammar1 = Grammar::from_regex(r"[0-9]+", Some(false)).unwrap();
+    /// let grammar2 = Grammar::from_regex(r"[a-z]+", Some(false)).unwrap();
     /// let union_grammar = Grammar::union(&[grammar1, grammar2]);
     /// assert!(!union_grammar.is_null());
     /// ```
@@ -971,9 +1054,9 @@ impl Grammar {
     /// # Example
     /// ```
     /// # use xgrammar::Grammar;
-    /// let greeting = Grammar::from_regex(r"Hello", Some(false));
-    /// let space = Grammar::from_regex(r" ", Some(false));
-    /// let name = Grammar::from_regex(r"[A-Z][a-z]+", Some(false));
+    /// let greeting = Grammar::from_regex(r"Hello", Some(false)).unwrap();
+    /// let space = Grammar::from_regex(r" ", Some(false)).unwrap();
+    /// let name = Grammar::from_regex(r"[A-Z][a-z]+", Some(false)).unwrap();
     /// let concat_grammar = Grammar::concat(&[greeting, space, name]);
     /// assert!(!concat_grammar.is_null());
     /// ```
