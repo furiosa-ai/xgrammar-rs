@@ -21,25 +21,6 @@ pub type VocabMap = std::collections::HashMap<String, u32>;
 
 pub type TokenId = i32;
 
-/// Represents a structural tag item with begin, schema, and end components.
-/// This is used for structured text generation with specific formatting tags.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StructuralTagItem {
-    /// The beginning tag/marker
-    pub begin: String,
-    /// The JSON schema for the content
-    pub schema: String,
-    /// The ending tag/marker
-    pub end: String,
-}
-
-impl StructuralTagItem {
-    /// Create a new StructuralTagItem
-    pub fn new(begin: String, schema: String, end: String) -> Self {
-        Self { begin, schema, end }
-    }
-}
-
 cpp! {{
     #include "xgrammar/xgrammar.h"
     #include <picojson.h>
@@ -123,6 +104,65 @@ pub struct MatcherResult {
     pub success: bool,
     pub value: bool,
     pub error_message: *mut std::os::raw::c_char,
+}
+
+/// Helper function to safely extract and free C++ error message.
+///
+/// # Safety
+/// The error_message_ptr must be a valid C string pointer allocated with strdup
+/// and must not be null.
+unsafe fn extract_and_free_error_message(error_message_ptr: *mut std::os::raw::c_char) -> String {
+    // SAFETY: The caller guarantees that error_message_ptr is a valid C string
+    // allocated with strdup and is not null
+    unsafe {
+        let msg = CStr::from_ptr(error_message_ptr).to_string_lossy().into_owned();
+        libc::free(error_message_ptr as *mut libc::c_void);
+        msg
+    }
+}
+
+impl From<GrammarResult> for Result<Grammar> {
+    fn from(result: GrammarResult) -> Self {
+        if result.success {
+            Ok(result.grammar)
+        } else {
+            let error_msg = unsafe { extract_and_free_error_message(result.error_message) };
+            Err(XGrammarErr::InvalidGrammar(error_msg))
+        }
+    }
+}
+
+impl From<CompiledGrammarResult> for Result<CompiledGrammar> {
+    fn from(result: CompiledGrammarResult) -> Self {
+        if result.success {
+            Ok(result.compiled_grammar)
+        } else {
+            let error_msg = unsafe { extract_and_free_error_message(result.error_message) };
+            Err(XGrammarErr::CompilationError(error_msg))
+        }
+    }
+}
+
+impl From<MatcherResult> for Result<bool> {
+    fn from(result: MatcherResult) -> Self {
+        if result.success {
+            Ok(result.value)
+        } else {
+            let error_msg = unsafe { extract_and_free_error_message(result.error_message) };
+            Err(XGrammarErr::MatcherError(error_msg))
+        }
+    }
+}
+
+impl From<MatcherResult> for Result<()> {
+    fn from(result: MatcherResult) -> Self {
+        if result.success {
+            Ok(())
+        } else {
+            let error_msg = unsafe { extract_and_free_error_message(result.error_message) };
+            Err(XGrammarErr::MatcherError(error_msg))
+        }
+    }
 }
 
 pub static HF_CONFIG_FILE: &str = "config.json";
@@ -458,16 +498,7 @@ impl GrammarCompiler {
             }
         });
 
-        if result.success {
-            Ok(result.compiled_grammar)
-        } else {
-            let error_msg = unsafe {
-                let msg = CStr::from_ptr(result.error_message).to_string_lossy().into_owned();
-                libc::free(result.error_message as *mut libc::c_void);
-                msg
-            };
-            Err(XGrammarErr::CompilationError(error_msg))
-        }
+        result.into()
     }
 
     /// Compile a grammar for standard JSON format.
@@ -501,16 +532,7 @@ impl GrammarCompiler {
             }
         });
 
-        if result.success {
-            Ok(result.compiled_grammar)
-        } else {
-            let error_msg = unsafe {
-                let msg = CStr::from_ptr(result.error_message).to_string_lossy().into_owned();
-                libc::free(result.error_message as *mut libc::c_void);
-                msg
-            };
-            Err(XGrammarErr::CompilationError(error_msg))
-        }
+        result.into()
     }
 
     /// Compile a grammar from a JSON schema string.
@@ -609,16 +631,7 @@ impl GrammarCompiler {
             }
         });
 
-        if result.success {
-            Ok(result.compiled_grammar)
-        } else {
-            let error_msg = unsafe {
-                let msg = CStr::from_ptr(result.error_message).to_string_lossy().into_owned();
-                libc::free(result.error_message as *mut libc::c_void);
-                msg
-            };
-            Err(XGrammarErr::CompilationError(error_msg))
-        }
+        result.into()
     }
 
     /// Compile a grammar from a regular expression pattern.
@@ -663,16 +676,7 @@ impl GrammarCompiler {
             }
         });
 
-        if result.success {
-            Ok(result.compiled_grammar)
-        } else {
-            let error_msg = unsafe {
-                let msg = CStr::from_ptr(result.error_message).to_string_lossy().into_owned();
-                libc::free(result.error_message as *mut libc::c_void);
-                msg
-            };
-            Err(XGrammarErr::CompilationError(error_msg))
-        }
+        result.into()
     }
 
     /// Clear the internal cache of compiled grammars.
@@ -749,16 +753,7 @@ impl GrammarCompiler {
             }
         });
 
-        if result.success {
-            Ok(result.compiled_grammar)
-        } else {
-            let error_msg = unsafe {
-                let msg = CStr::from_ptr(result.error_message).to_string_lossy().into_owned();
-                libc::free(result.error_message as *mut libc::c_void);
-                msg
-            };
-            Err(XGrammarErr::CompilationError(error_msg))
-        }
+        result.into()
     }
 }
 
@@ -836,16 +831,7 @@ impl Grammar {
             }
         });
 
-        if result.success {
-            Ok(result.grammar)
-        } else {
-            let error_msg = unsafe {
-                let msg = CStr::from_ptr(result.error_message).to_string_lossy().into_owned();
-                libc::free(result.error_message as *mut libc::c_void);
-                msg
-            };
-            Err(XGrammarErr::InvalidGrammar(error_msg))
-        }
+        result.into()
     }
 
     /// Construct a grammar from a JSON schema string.
@@ -976,16 +962,7 @@ impl Grammar {
             }
         });
 
-        if result.success {
-            Ok(result.grammar)
-        } else {
-            let error_msg = unsafe {
-                let msg = CStr::from_ptr(result.error_message).to_string_lossy().into_owned();
-                libc::free(result.error_message as *mut libc::c_void);
-                msg
-            };
-            Err(XGrammarErr::InvalidGrammar(error_msg))
-        }
+        result.into()
     }
 
     /// Construct a grammar from a regular expression string.
@@ -1034,16 +1011,7 @@ impl Grammar {
             }
         });
 
-        if result.success {
-            Ok(result.grammar)
-        } else {
-            let error_msg = unsafe {
-                let msg = CStr::from_ptr(result.error_message).to_string_lossy().into_owned();
-                libc::free(result.error_message as *mut libc::c_void);
-                msg
-            };
-            Err(XGrammarErr::InvalidGrammar(error_msg))
-        }
+        result.into()
     }
 
     /// Construct a grammar from a structural tag JSON string.
@@ -1403,16 +1371,7 @@ impl GrammarMatcher {
             }
         });
 
-        if result.success {
-            Ok(result.value)
-        } else {
-            let error_msg = unsafe {
-                let msg = CStr::from_ptr(result.error_message).to_string_lossy().into_owned();
-                libc::free(result.error_message as *mut libc::c_void);
-                msg
-            };
-            Err(XGrammarErr::MatcherError(error_msg))
-        }
+        result.into()
     }
 
     /// Rollback the matcher to a previous state.
@@ -1439,16 +1398,7 @@ impl GrammarMatcher {
             }
         });
 
-        if result.success {
-            Ok(())
-        } else {
-            let error_msg = unsafe {
-                let msg = CStr::from_ptr(result.error_message).to_string_lossy().into_owned();
-                libc::free(result.error_message as *mut libc::c_void);
-                msg
-            };
-            Err(XGrammarErr::MatcherError(error_msg))
-        }
+        result.into()
     }
 
     /// Check if the matcher has accepted the stop token and terminated.
