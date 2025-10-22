@@ -164,7 +164,7 @@ fn test_compile_regex() {
     for pattern in regex_patterns {
         let compiled_regex = compiler
             .compile_regex(pattern)
-            .expect(&format!("Failed to compile regex pattern: {}", pattern));
+            .unwrap_or_else(|_| panic!("Failed to compile regex pattern: {}", pattern));
         assert!(compiled_regex.memory_size_bytes() > 0);
         assert_eq!(compiled_regex.get_tokenizer_info().get_vocab_size(), 102400);
         assert_eq!(compiled_regex.get_tokenizer_info().get_vocab_type(), VocabType::ByteLevel);

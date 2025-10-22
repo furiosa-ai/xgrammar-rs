@@ -119,9 +119,16 @@ impl Drop for GrammarResult {
 
 impl From<GrammarResult> for Result<Grammar> {
     fn from(result: GrammarResult) -> Self {
+        use std::mem::ManuallyDrop;
+
+        // Wrap in ManuallyDrop to prevent automatic drop
+        let result = ManuallyDrop::new(result);
+
         if result.success {
-            Ok(result.grammar)
+            // SAFETY: We're taking ownership and preventing double-free by using ManuallyDrop
+            unsafe { Ok(std::ptr::read(&result.grammar)) }
         } else {
+            // SAFETY: error_message is valid and we're taking ownership
             let error_msg = unsafe { extract_and_free_error_message(result.error_message) };
             Err(XGrammarErr::InvalidGrammar(error_msg))
         }
@@ -147,9 +154,16 @@ impl Drop for CompiledGrammarResult {
 
 impl From<CompiledGrammarResult> for Result<CompiledGrammar> {
     fn from(result: CompiledGrammarResult) -> Self {
+        use std::mem::ManuallyDrop;
+
+        // Wrap in ManuallyDrop to prevent automatic drop
+        let result = ManuallyDrop::new(result);
+
         if result.success {
-            Ok(result.compiled_grammar)
+            // SAFETY: We're taking ownership and preventing double-free by using ManuallyDrop
+            unsafe { Ok(std::ptr::read(&result.compiled_grammar)) }
         } else {
+            // SAFETY: error_message is valid and we're taking ownership
             let error_msg = unsafe { extract_and_free_error_message(result.error_message) };
             Err(XGrammarErr::CompilationError(error_msg))
         }
@@ -175,9 +189,15 @@ impl Drop for MatcherResult {
 
 impl From<MatcherResult> for Result<bool> {
     fn from(result: MatcherResult) -> Self {
+        use std::mem::ManuallyDrop;
+
+        // Wrap in ManuallyDrop to prevent automatic drop
+        let result = ManuallyDrop::new(result);
+
         if result.success {
             Ok(result.value)
         } else {
+            // SAFETY: error_message is valid and we're taking ownership
             let error_msg = unsafe { extract_and_free_error_message(result.error_message) };
             Err(XGrammarErr::MatcherError(error_msg))
         }
@@ -186,9 +206,15 @@ impl From<MatcherResult> for Result<bool> {
 
 impl From<MatcherResult> for Result<()> {
     fn from(result: MatcherResult) -> Self {
+        use std::mem::ManuallyDrop;
+
+        // Wrap in ManuallyDrop to prevent automatic drop
+        let result = ManuallyDrop::new(result);
+
         if result.success {
             Ok(())
         } else {
+            // SAFETY: error_message is valid and we're taking ownership
             let error_msg = unsafe { extract_and_free_error_message(result.error_message) };
             Err(XGrammarErr::MatcherError(error_msg))
         }
@@ -1125,12 +1151,7 @@ impl Grammar {
             }
         });
 
-        if result.success {
-            Ok(result.grammar)
-        } else {
-            let error_msg = unsafe { extract_and_free_error_message(result.error_message) };
-            Err(XGrammarErr::InvalidStructuralTag(error_msg))
-        }
+        result.into()
     }
 
     /// Get a grammar for standard JSON format.
