@@ -54,6 +54,7 @@ fn assert_metadata(
 
 /// Test to verify vocab type and add_prefix_space from tokenizer metadata
 #[test]
+#[ignore = "Ignored by default to avoid frequent HF hub downloads"]
 fn test_tokenizer_info() {
     for &(tokenizer_id, vocab_type, add_prefix_space) in TEST_TOKENIZER_CASES {
         tracing::info!("Testing tokenizer: {}", tokenizer_id);
