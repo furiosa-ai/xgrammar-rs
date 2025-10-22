@@ -1,7 +1,7 @@
 mod common;
 
 use serde_json::json;
-use xgrammar::Grammar;
+use xgrammar::{Grammar, XGrammarErr};
 
 #[test]
 fn test_grammar_from_ebnf() {
@@ -124,37 +124,34 @@ fn test_grammar_concat() {
 }
 
 #[test]
-fn test_grammar_from_ebnf_error_handling() {
+fn test_grammar_from_ebnf_error() {
     let invalid_ebnf = r#"root ::= "unterminated string"#;
-    let result = Grammar::from_ebnf(invalid_ebnf, None);
-    assert!(result.is_err());
-    if let Err(err) = result {
-        let err_msg = err.to_string();
-        assert!(
-            err_msg.contains("EBNF lexer error at line 1, column 30: Expect \" in string literal")
-        );
-    }
+    let Err(XGrammarErr::InvalidGrammar(err_msg)) = Grammar::from_ebnf(invalid_ebnf, None) else {
+        panic!("Expected grammar creation to fail, but it succeeded");
+    };
+
+    assert!(err_msg.contains("EBNF lexer error at line 1, column 30: Expect \" in string literal"));
 }
 
 #[test]
-fn test_grammar_from_json_schema_error_handling() {
+fn test_grammar_from_json_schema_error() {
     let invalid_json = "{ invalid json }";
-    let result = Grammar::from_json_schema(invalid_json, None, None, None, None, None, None);
-    assert!(result.is_err());
-    if let Err(err) = result {
-        let err_msg = err.to_string();
-        assert!(err_msg.contains("Failed to parse JSON: syntax error"));
-    }
+    let Err(XGrammarErr::InvalidGrammar(err_msg)) =
+        Grammar::from_json_schema(invalid_json, None, None, None, None, None, None)
+    else {
+        panic!("Expected grammar creation to fail, but it succeeded");
+    };
+
+    assert!(err_msg.contains("Failed to parse JSON: syntax error"));
 }
 
 #[test]
-fn test_grammar_from_regex_error_handling() {
+fn test_grammar_from_regex_error() {
     // Unclosed bracket
     let invalid_regex = "[";
-    let result = Grammar::from_regex(invalid_regex, None);
-    assert!(result.is_err());
-    if let Err(err) = result {
-        let err_msg = err.to_string();
-        assert!(err_msg.contains("Regex parsing error at position 2: Unclosed '['"));
-    }
+    let Err(XGrammarErr::InvalidGrammar(err_msg)) = Grammar::from_regex(invalid_regex, None) else {
+        panic!("Expected grammar creation to fail, but it succeeded");
+    };
+
+    assert!(err_msg.contains("Regex parsing error at position 2: Unclosed '['"));
 }

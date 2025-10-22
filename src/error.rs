@@ -21,4 +21,6 @@ pub enum XGrammarErr {
     InvalidStructuralTag(String),
     #[error("invalid grammar: {0}")]
     InvalidGrammar(String),
+    #[error("compilation error: {0}")]
+    CompilationError(String),
 }

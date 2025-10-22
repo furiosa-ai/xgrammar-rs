@@ -18,7 +18,7 @@ fn test_compiled_grammar() {
     let compiler = GrammarCompiler::new(&tokenizer_info);
 
     let time_start = Instant::now();
-    let compiled_grammar = compiler.compile_grammar(&grammar);
+    let compiled_grammar = compiler.compile_grammar(&grammar).expect("Failed to compile grammar");
     let time_end = Instant::now();
     println!("Time to get compiled grammar: {:?}", time_end.duration_since(time_start));
 
@@ -62,14 +62,18 @@ fn do_test_grammar_compiler_json_test(max_threads: usize) {
     };
 
     let time_start = Instant::now();
-    let compiled_grammar = grammar_compiler.compile_builtin_json_grammar();
+    let compiled_grammar = grammar_compiler
+        .compile_builtin_json_grammar()
+        .expect("Failed to compile builtin JSON grammar");
     let time_end = Instant::now();
     println!("Time to get compiled grammar: {:?}", time_end.duration_since(time_start));
     let matcher = GrammarMatcher::with(&compiled_grammar, None, Some(true), None);
     check_matcher(matcher);
 
     let time_start = Instant::now();
-    let compiled_grammar_again = grammar_compiler.compile_builtin_json_grammar();
+    let compiled_grammar_again = grammar_compiler
+        .compile_builtin_json_grammar()
+        .expect("Failed to compile builtin JSON grammar");
     let time_end = Instant::now();
     println!("Time to get compiled grammar again: {:?}", time_end.duration_since(time_start));
     let matcher_again = GrammarMatcher::with(&compiled_grammar_again, None, Some(true), None);
@@ -78,7 +82,9 @@ fn do_test_grammar_compiler_json_test(max_threads: usize) {
     grammar_compiler.clear_cache();
 
     let time_start = Instant::now();
-    let compiled_grammar_after_clear = grammar_compiler.compile_builtin_json_grammar();
+    let compiled_grammar_after_clear = grammar_compiler
+        .compile_builtin_json_grammar()
+        .expect("Failed to compile builtin JSON grammar");
     let time_end = Instant::now();
     println!("Time to get compiled grammar after clear: {:?}", time_end.duration_since(time_start));
     let matcher_after_clear =
@@ -105,7 +111,8 @@ fn test_matcher_accept_string_and_bitmask() {
         TokenizerInfo::from_pretrained(GPT_OSS_20B_PRETRAINED_ID, None, None, None)
             .expect("Failed to load tokenizer info");
     let compiler = GrammarCompiler::new(&tokenizer_info);
-    let compiled_grammar = compiler.compile_builtin_json_grammar();
+    let compiled_grammar =
+        compiler.compile_builtin_json_grammar().expect("Failed to compile builtin JSON grammar");
     let mut matcher = GrammarMatcher::with(&compiled_grammar, None, Some(true), None);
 
     // 2. Initial state check

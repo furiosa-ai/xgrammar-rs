@@ -11,7 +11,7 @@ use std::str::FromStr;
 
 use cpp::{cpp, cpp_class};
 use dlpark::{traits::TensorView, versioned::SafeManagedTensorVersioned as DLTensor};
-use error::XGrammarErr;
+pub use error::XGrammarErr;
 use serde_json::Value;
 pub use tokenizers;
 
@@ -59,6 +59,12 @@ cpp! {{
         Grammar grammar;
         char* error_message;
     };
+
+    struct CompiledGrammarResult {
+        bool success;
+        CompiledGrammar compiled_grammar;
+        char* error_message;
+    };
 }}
 
 cpp_class!(
@@ -96,6 +102,13 @@ pub struct MetadataFromHF {
 pub struct GrammarResult {
     pub success: bool,
     pub grammar: Grammar,
+    pub error_message: *mut std::os::raw::c_char,
+}
+
+#[repr(C)]
+pub struct CompiledGrammarResult {
+    pub success: bool,
+    pub compiled_grammar: CompiledGrammar,
     pub error_message: *mut std::os::raw::c_char,
 }
 
@@ -338,8 +351,6 @@ impl CompiledGrammar {
     }
 }
 
-// TODO: xgrammar::GrammarCompiler cpp implementations cannot handle invalid inputs gracefully.
-//  We should add error handling in application layer.
 impl GrammarCompiler {
     /// Create a new GrammarCompiler with default parameters.
     ///
@@ -405,14 +416,45 @@ impl GrammarCompiler {
     /// * `grammar` - The grammar to compile
     ///
     /// # Returns
-    /// * A compiled grammar that can be used with GrammarMatcher
-    pub fn compile_grammar(&self, grammar: &Grammar) -> CompiledGrammar {
-        cpp!(unsafe [
+    /// * `Ok(CompiledGrammar)` - A compiled grammar that can be used with GrammarMatcher
+    /// * `Err(XGrammarErr)` - Error if the grammar compilation fails
+    ///
+    /// # Errors
+    /// * Returns error if the grammar is invalid or compilation fails
+    ///
+    /// # Example
+    /// ```
+    /// # use xgrammar::{Grammar, GrammarCompiler, TokenizerInfo};
+    /// # fn example(tokenizer_info: &TokenizerInfo) -> xgrammar::Result<()> {
+    /// let compiler = GrammarCompiler::new(tokenizer_info);
+    /// let grammar = Grammar::builtin_json_grammar();
+    /// let compiled = compiler.compile_grammar(&grammar)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn compile_grammar(&self, grammar: &Grammar) -> Result<CompiledGrammar> {
+        let result = cpp!(unsafe [
             self as "xgrammar::GrammarCompiler*",
             grammar as "const xgrammar::Grammar*"
-        ] -> CompiledGrammar as "xgrammar::CompiledGrammar" {
-            return self->CompileGrammar(*grammar);
-        })
+        ] -> CompiledGrammarResult as "CompiledGrammarResult" {
+            try {
+                auto compiled = self->CompileGrammar(*grammar);
+                return {true, compiled, nullptr};
+            } catch (const std::exception& e) {
+                return {false, CompiledGrammar(NullObj()), strdup(e.what())};
+            }
+        });
+
+        if result.success {
+            Ok(result.compiled_grammar)
+        } else {
+            let error_msg = unsafe {
+                let msg = CStr::from_ptr(result.error_message).to_string_lossy().into_owned();
+                libc::free(result.error_message as *mut libc::c_void);
+                msg
+            };
+            Err(XGrammarErr::CompilationError(error_msg))
+        }
     }
 
     /// Compile a grammar for standard JSON format.
@@ -421,11 +463,41 @@ impl GrammarCompiler {
     /// any valid JSON without schema constraints.
     ///
     /// # Returns
-    /// * A compiled grammar that matches standard JSON format
-    pub fn compile_builtin_json_grammar(&self) -> CompiledGrammar {
-        cpp!(unsafe [self as "xgrammar::GrammarCompiler*"] -> CompiledGrammar as "xgrammar::CompiledGrammar" {
-            return self->CompileBuiltinJSONGrammar();
-        })
+    /// * `Ok(CompiledGrammar)` - A compiled grammar that matches standard JSON format
+    /// * `Err(XGrammarErr)` - Error if the grammar compilation fails
+    ///
+    /// # Errors
+    /// * Returns error if the builtin JSON grammar compilation fails (unlikely)
+    ///
+    /// # Example
+    /// ```
+    /// # use xgrammar::{GrammarCompiler, TokenizerInfo};
+    /// # fn example(tokenizer_info: &TokenizerInfo) -> xgrammar::Result<()> {
+    /// let compiler = GrammarCompiler::new(tokenizer_info);
+    /// let compiled = compiler.compile_builtin_json_grammar()?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn compile_builtin_json_grammar(&self) -> Result<CompiledGrammar> {
+        let result = cpp!(unsafe [self as "xgrammar::GrammarCompiler*"] -> CompiledGrammarResult as "CompiledGrammarResult" {
+            try {
+                auto compiled = self->CompileBuiltinJSONGrammar();
+                return {true, compiled, nullptr};
+            } catch (const std::exception& e) {
+                return {false, CompiledGrammar(NullObj()), strdup(e.what())};
+            }
+        });
+
+        if result.success {
+            Ok(result.compiled_grammar)
+        } else {
+            let error_msg = unsafe {
+                let msg = CStr::from_ptr(result.error_message).to_string_lossy().into_owned();
+                libc::free(result.error_message as *mut libc::c_void);
+                msg
+            };
+            Err(XGrammarErr::CompilationError(error_msg))
+        }
     }
 
     /// Compile a grammar from a JSON schema string.
@@ -442,7 +514,23 @@ impl GrammarCompiler {
     /// * `max_whitespace_cnt` - Maximum number of consecutive whitespace characters allowed. None means no limit
     ///
     /// # Returns
-    /// * A compiled grammar that can be used with GrammarMatcher
+    /// * `Ok(CompiledGrammar)` - A compiled grammar that can be used with GrammarMatcher
+    /// * `Err(XGrammarErr)` - Error if the JSON schema is invalid or compilation fails
+    ///
+    /// # Errors
+    /// * Returns error if the JSON schema is invalid
+    /// * Returns error if the schema cannot be compiled
+    ///
+    /// # Example
+    /// ```
+    /// # use xgrammar::{GrammarCompiler, TokenizerInfo};
+    /// # fn example(tokenizer_info: &TokenizerInfo) -> xgrammar::Result<()> {
+    /// let compiler = GrammarCompiler::new(tokenizer_info);
+    /// let schema = r#"{"type": "object", "properties": {"name": {"type": "string"}}}"#;
+    /// let compiled = compiler.compile_json_schema(schema, None, None, None, None, None)?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn compile_json_schema(
         &self,
         schema: &str,
@@ -451,7 +539,7 @@ impl GrammarCompiler {
         separators: Option<(String, String)>,
         strict_mode: Option<bool>,
         max_whitespace_cnt: Option<i32>,
-    ) -> CompiledGrammar {
+    ) -> Result<CompiledGrammar> {
         let schema_cstring = CString::new(schema).expect("Failed to convert schema to CString");
         let schema_ptr = schema_cstring.as_ptr();
         let any_whitespace = any_whitespace.unwrap_or(true);
@@ -475,7 +563,7 @@ impl GrammarCompiler {
                 (None, None, std::ptr::null(), std::ptr::null())
             };
 
-        cpp!(unsafe [
+        let result = cpp!(unsafe [
             self as "xgrammar::GrammarCompiler*",
             schema_ptr as "const char*",
             any_whitespace as "bool",
@@ -487,21 +575,37 @@ impl GrammarCompiler {
             strict_mode as "bool",
             has_max_whitespace_cnt as "bool",
             max_whitespace_cnt_value as "int"
-        ] -> CompiledGrammar as "xgrammar::CompiledGrammar" {
-            std::string schema_str(schema_ptr);
-            std::optional<int> opt_indent = has_indent ? std::make_optional(indent_value) : std::nullopt;
-            std::optional<std::pair<std::string, std::string>> opt_separators;
+        ] -> CompiledGrammarResult as "CompiledGrammarResult" {
+            try {
+                std::string schema_str(schema_ptr);
+                std::optional<int> opt_indent = has_indent ? std::make_optional(indent_value) : std::nullopt;
+                std::optional<std::pair<std::string, std::string>> opt_separators;
 
-            if (has_separators) {
-                opt_separators = std::make_pair(std::string(obj_sep_ptr), std::string(array_sep_ptr));
-            } else {
-                opt_separators = std::nullopt;
+                if (has_separators) {
+                    opt_separators = std::make_pair(std::string(obj_sep_ptr), std::string(array_sep_ptr));
+                } else {
+                    opt_separators = std::nullopt;
+                }
+
+                std::optional<int> opt_max_whitespace_cnt = has_max_whitespace_cnt ? std::make_optional(max_whitespace_cnt_value) : std::nullopt;
+
+                auto compiled = self->CompileJSONSchema(schema_str, any_whitespace, opt_indent, opt_separators, strict_mode, opt_max_whitespace_cnt);
+                return {true, compiled, nullptr};
+            } catch (const std::exception& e) {
+                return {false, CompiledGrammar(NullObj()), strdup(e.what())};
             }
+        });
 
-            std::optional<int> opt_max_whitespace_cnt = has_max_whitespace_cnt ? std::make_optional(max_whitespace_cnt_value) : std::nullopt;
-
-            return self->CompileJSONSchema(schema_str, any_whitespace, opt_indent, opt_separators, strict_mode, opt_max_whitespace_cnt);
-        })
+        if result.success {
+            Ok(result.compiled_grammar)
+        } else {
+            let error_msg = unsafe {
+                let msg = CStr::from_ptr(result.error_message).to_string_lossy().into_owned();
+                libc::free(result.error_message as *mut libc::c_void);
+                msg
+            };
+            Err(XGrammarErr::CompilationError(error_msg))
+        }
     }
 
     /// Compile a grammar from a regular expression pattern.
@@ -513,18 +617,49 @@ impl GrammarCompiler {
     /// * `regex` - The regex pattern string to compile
     ///
     /// # Returns
-    /// * A compiled grammar that can be used with GrammarMatcher
-    pub fn compile_regex(&self, regex: &str) -> CompiledGrammar {
+    /// * `Ok(CompiledGrammar)` - A compiled grammar that can be used with GrammarMatcher
+    /// * `Err(XGrammarErr)` - Error if the regex pattern is invalid or compilation fails
+    ///
+    /// # Errors
+    /// * Returns error if the regex pattern is invalid
+    /// * Returns error if the regex cannot be compiled
+    ///
+    /// # Example
+    /// ```
+    /// # use xgrammar::{GrammarCompiler, TokenizerInfo};
+    /// # fn example(tokenizer_info: &TokenizerInfo) -> xgrammar::Result<()> {
+    /// let compiler = GrammarCompiler::new(tokenizer_info);
+    /// let compiled = compiler.compile_regex(r"[a-z]+@[a-z]+\.[a-z]+")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn compile_regex(&self, regex: &str) -> Result<CompiledGrammar> {
         let regex_cstring = CString::new(regex).expect("Failed to convert regex to CString");
         let regex_ptr = regex_cstring.as_ptr();
 
-        cpp!(unsafe [
+        let result = cpp!(unsafe [
             self as "xgrammar::GrammarCompiler*",
             regex_ptr as "const char*"
-        ] -> CompiledGrammar as "xgrammar::CompiledGrammar" {
-            std::string regex_str(regex_ptr);
-            return self->CompileRegex(regex_str);
-        })
+        ] -> CompiledGrammarResult as "CompiledGrammarResult" {
+            try {
+                std::string regex_str(regex_ptr);
+                auto compiled = self->CompileRegex(regex_str);
+                return {true, compiled, nullptr};
+            } catch (const std::exception& e) {
+                return {false, CompiledGrammar(NullObj()), strdup(e.what())};
+            }
+        });
+
+        if result.success {
+            Ok(result.compiled_grammar)
+        } else {
+            let error_msg = unsafe {
+                let msg = CStr::from_ptr(result.error_message).to_string_lossy().into_owned();
+                libc::free(result.error_message as *mut libc::c_void);
+                msg
+            };
+            Err(XGrammarErr::CompilationError(error_msg))
+        }
     }
 
     /// Clear the internal cache of compiled grammars.
@@ -566,29 +701,51 @@ impl GrammarCompiler {
     ///   The JSON should contain the structural tag items and triggers.
     ///
     /// # Returns
-    /// * A compiled grammar that can be used with GrammarMatcher
+    /// * `Ok(CompiledGrammar)` - A compiled grammar that can be used with GrammarMatcher
+    /// * `Err(XGrammarErr)` - Error if the structural tag is invalid or compilation fails
+    ///
+    /// # Errors
+    /// * Returns error if the structural tag JSON is invalid
+    /// * Returns error if the structural tag cannot be compiled
     ///
     /// # Example
     /// ```no_run
     /// # use xgrammar::{GrammarCompiler, TokenizerInfo};
-    /// # fn example(tokenizer_info: &TokenizerInfo) {
+    /// # fn example(tokenizer_info: &TokenizerInfo) -> xgrammar::Result<()> {
     /// let compiler = GrammarCompiler::new(tokenizer_info);
     /// let structural_tag_json = r#"{"tags": [{"begin": "<start>", "schema": "{}", "end": "</start>"}], "triggers": ["trigger1"]}"#;
-    /// let compiled_grammar = compiler.compile_structural_tag(structural_tag_json);
+    /// let compiled_grammar = compiler.compile_structural_tag(structural_tag_json)?;
+    /// # Ok(())
     /// # }
     /// ```
-    pub fn compile_structural_tag(&self, structural_tag_json: &str) -> CompiledGrammar {
+    pub fn compile_structural_tag(&self, structural_tag_json: &str) -> Result<CompiledGrammar> {
         let structural_tag_json_cstring = CString::new(structural_tag_json)
             .expect("Failed to convert structural_tag_json to CString");
         let structural_tag_json_ptr = structural_tag_json_cstring.as_ptr();
 
-        cpp!(unsafe [
+        let result = cpp!(unsafe [
             self as "xgrammar::GrammarCompiler*",
             structural_tag_json_ptr as "const char*"
-        ] -> CompiledGrammar as "xgrammar::CompiledGrammar" {
-            std::string structural_tag_json_str(structural_tag_json_ptr);
-            return self->CompileStructuralTag(structural_tag_json_str);
-        })
+        ] -> CompiledGrammarResult as "CompiledGrammarResult" {
+            try {
+                std::string structural_tag_json_str(structural_tag_json_ptr);
+                auto compiled = self->CompileStructuralTag(structural_tag_json_str);
+                return {true, compiled, nullptr};
+            } catch (const std::exception& e) {
+                return {false, CompiledGrammar(NullObj()), strdup(e.what())};
+            }
+        });
+
+        if result.success {
+            Ok(result.compiled_grammar)
+        } else {
+            let error_msg = unsafe {
+                let msg = CStr::from_ptr(result.error_message).to_string_lossy().into_owned();
+                libc::free(result.error_message as *mut libc::c_void);
+                msg
+            };
+            Err(XGrammarErr::CompilationError(error_msg))
+        }
     }
 }
 

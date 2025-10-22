@@ -1,7 +1,7 @@
 mod common;
 
 use serde_json::json;
-use xgrammar::{GrammarCompiler, TokenizerInfo, VocabType};
+use xgrammar::{GrammarCompiler, TokenizerInfo, VocabType, XGrammarErr};
 
 const EXAONE_4_0_32B_PRETRAINED_ID: &str = "LGAI-EXAONE/EXAONE-4.0-32B";
 
@@ -10,7 +10,8 @@ fn test_compile_builtin_json_grammar() {
     let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
         .expect("Failed to load tokenizer info");
     let compiler = GrammarCompiler::new(&tok_info);
-    let compiled_grammar = compiler.compile_builtin_json_grammar();
+    let compiled_grammar =
+        compiler.compile_builtin_json_grammar().expect("Failed to compile builtin JSON grammar");
 
     assert!(compiled_grammar.memory_size_bytes() > 0);
     assert_eq!(compiled_grammar.get_tokenizer_info().get_vocab_size(), 102400);
@@ -34,14 +35,17 @@ fn test_cache_management() {
     );
 
     // Compile some grammars to populate cache
-    let _grammar1 = compiler.compile_builtin_json_grammar();
+    let _grammar1 =
+        compiler.compile_builtin_json_grammar().expect("Failed to compile builtin JSON grammar");
     let cache_size_after_json = compiler.get_cache_size_bytes();
 
-    let _grammar2 = compiler.compile_regex(r"\d+");
+    let _grammar2 = compiler.compile_regex(r"\d+").expect("Failed to compile regex");
     let cache_size_after_regex = compiler.get_cache_size_bytes();
 
     let schema = json!({"type": "object", "properties": {"name": {"type": "string"}}});
-    let _grammar3 = compiler.compile_json_schema(&schema.to_string(), None, None, None, None, None);
+    let _grammar3 = compiler
+        .compile_json_schema(&schema.to_string(), None, None, None, None, None)
+        .expect("Failed to compile JSON schema");
     let cache_size_after_schema = compiler.get_cache_size_bytes();
 
     println!("Cache size after JSON grammar: {} bytes", cache_size_after_json);
@@ -108,21 +112,24 @@ fn test_compile_json_schema() {
     });
 
     // Test with default parameters
-    let compiled_grammar =
-        compiler.compile_json_schema(&schema.to_string(), None, None, None, None, None);
+    let compiled_grammar = compiler
+        .compile_json_schema(&schema.to_string(), None, None, None, None, None)
+        .expect("Failed to compile JSON schema");
     assert!(compiled_grammar.memory_size_bytes() > 0);
     assert_eq!(compiled_grammar.get_tokenizer_info().get_vocab_size(), 102400);
     assert_eq!(compiled_grammar.get_tokenizer_info().get_vocab_type(), VocabType::ByteLevel);
 
     // Test with custom parameters
-    let compiled_grammar_custom = compiler.compile_json_schema(
-        &schema.to_string(),
-        Some(false),
-        Some(2),
-        Some((":".to_string(), ",".to_string())),
-        Some(true),
-        None,
-    );
+    let compiled_grammar_custom = compiler
+        .compile_json_schema(
+            &schema.to_string(),
+            Some(false),
+            Some(2),
+            Some((":".to_string(), ",".to_string())),
+            Some(true),
+            None,
+        )
+        .expect("Failed to compile JSON schema with custom parameters");
     assert!(compiled_grammar_custom.memory_size_bytes() > 0);
 
     // Test with a different schema (array type)
@@ -133,8 +140,9 @@ fn test_compile_json_schema() {
         "maxItems": 3
     });
 
-    let array_compiled =
-        compiler.compile_json_schema(&array_schema.to_string(), None, None, None, None, None);
+    let array_compiled = compiler
+        .compile_json_schema(&array_schema.to_string(), None, None, None, None, None)
+        .expect("Failed to compile array schema");
     assert!(array_compiled.memory_size_bytes() > 0);
 }
 
@@ -154,7 +162,9 @@ fn test_compile_regex() {
     ];
 
     for pattern in regex_patterns {
-        let compiled_regex = compiler.compile_regex(pattern);
+        let compiled_regex = compiler
+            .compile_regex(pattern)
+            .expect(&format!("Failed to compile regex pattern: {}", pattern));
         assert!(compiled_regex.memory_size_bytes() > 0);
         assert_eq!(compiled_regex.get_tokenizer_info().get_vocab_size(), 102400);
         assert_eq!(compiled_regex.get_tokenizer_info().get_vocab_type(), VocabType::ByteLevel);
@@ -181,6 +191,60 @@ fn test_compile_structural_tag() {
         }
     }"#;
 
-    let compiled_grammar = compiler.compile_structural_tag(structural_tag_json);
+    let compiled_grammar = compiler
+        .compile_structural_tag(structural_tag_json)
+        .expect("Failed to compile structural tag");
     assert!(compiled_grammar.memory_size_bytes() > 0);
+}
+
+#[test]
+fn test_compile_json_schema_error() {
+    let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
+        .expect("Failed to load tokenizer info");
+    let compiler = GrammarCompiler::new(&tok_info);
+
+    // Test with malformed JSON
+    let invalid_json = r#"{ not valid json }"#;
+    let Err(XGrammarErr::CompilationError(err_msg)) =
+        compiler.compile_json_schema(invalid_json, None, None, None, None, None)
+    else {
+        panic!("Expected compilation to fail, but it succeeded");
+    };
+
+    // Verify that error message contains key information
+    assert!(&err_msg.contains("Failed to parse JSON: syntax error at line 1 near: not valid json }. The JSON string is:{ not valid json }"));
+}
+
+#[test]
+fn test_compile_regex_error() {
+    let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
+        .expect("Failed to load tokenizer info");
+    let compiler = GrammarCompiler::new(&tok_info);
+
+    // Test with invalid regex pattern (unclosed bracket)
+    let invalid_pattern = r"[";
+    let Err(XGrammarErr::CompilationError(err_msg)) = compiler.compile_regex(invalid_pattern)
+    else {
+        panic!("Expected compilation to fail, but it succeeded");
+    };
+
+    // Verify that error message contains key information
+    assert!(err_msg.contains("Regex parsing error at position 2: Unclosed '['"));
+}
+
+#[test]
+fn test_compile_structural_tag_error() {
+    let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
+        .expect("Failed to load tokenizer info");
+    let compiler = GrammarCompiler::new(&tok_info);
+
+    // Test with malformed JSON
+    let invalid_json = r#"{ invalid json"#;
+    let Err(XGrammarErr::CompilationError(err_msg)) = compiler.compile_structural_tag(invalid_json)
+    else {
+        panic!("Expected compilation to fail, but it succeeded");
+    };
+
+    // Verify that error message contains key information
+    assert!(err_msg.contains("Failed to parse JSON: syntax error at line 1 near: invalid json"));
 }
