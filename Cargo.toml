@@ -34,6 +34,8 @@ cpp_build = "0.5.10"
 [dev-dependencies]
 ctor = "0.2"
 ndarray = "0.16"
+ndarray-rand = "0.15"
+rand = "0.8"
 
 [[test]]
 name = "test_grammar_matcher"
@@ -53,4 +55,8 @@ required-features = ["hf_hub"]
 
 [[test]]
 name = "test_tokenizer_info"
+required-features = ["hf_hub"]
+
+[[test]]
+name = "test_e2e"
 required-features = ["hf_hub"]

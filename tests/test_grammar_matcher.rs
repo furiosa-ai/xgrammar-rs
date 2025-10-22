@@ -235,7 +235,6 @@ fn test_fill_next_token_bitmask_error() {
     use dlpark::prelude::*;
     use xgrammar::XGrammarErr;
 
-    // Setup: Compile a simple JSON grammar
     let tokenizer_info =
         TokenizerInfo::from_pretrained(GPT_OSS_20B_PRETRAINED_ID, None, None, None)
             .expect("Failed to load tokenizer info");
@@ -243,21 +242,12 @@ fn test_fill_next_token_bitmask_error() {
     let compiled_grammar =
         compiler.compile_builtin_json_grammar().expect("Failed to compile builtin JSON grammar");
 
-    // Set terminate_without_stop_token to false and provide a stop token
-    // This ensures that is_terminated() only returns true after accepting a stop token
-    let stop_token_ids = vec![tokenizer_info.get_vocab_size()]; // Use an out-of-vocab token as stop
-    let mut matcher =
-        GrammarMatcher::with(&compiled_grammar, Some(&stop_token_ids), Some(false), None);
+    let mut matcher = GrammarMatcher::with(&compiled_grammar, None, Some(false), None);
 
     // Accept a complete valid JSON string
     assert!(matcher.accept_string("{\"key\":\"value\"}", None), "Should accept valid JSON");
 
-    // At this point, the matcher has completed the grammar but not terminated (no stop token yet)
-    // We need to simulate accepting a stop token to make IsStopTokenAccepted() return true
-    // For this test, let's use a different approach: test with invalid bitmask parameters
-
     // Test: Try to fill bitmask with invalid parameters (wrong dtype/shape)
-    // Create a bitmask with wrong size
     let wrong_bitmask_len = 10; // Too small
     let bitmask =
         ArrayD::from_shape_vec(IxDyn(&[1, wrong_bitmask_len]), vec![0i32; wrong_bitmask_len])
@@ -265,12 +255,92 @@ fn test_fill_next_token_bitmask_error() {
     let mut dl_tensor = SafeManagedTensorVersioned::new(bitmask).unwrap();
 
     let result = matcher.fill_next_token_bitmask(&mut dl_tensor, None, None);
-
     let Err(XGrammarErr::MatcherError(err_msg)) = result else {
         panic!("Expected MatcherError");
     };
-    // The error should be about bitmask size/shape mismatch
+
     assert!(
         err_msg.contains("The provided bitmask's shape is not valid: should be (batch_size, 6251)")
     );
+}
+
+#[test]
+fn test_stop_token_early_termination() {
+    use xgrammar::GrammarCompiler;
+
+    let tokenizer =
+        common::load_tokenizer(GPT_OSS_20B_PRETRAINED_ID).expect("Failed to load tokenizer");
+
+    let encoding = tokenizer.encode(".", false).expect("Failed to encode '.'");
+    let period_token_ids: Vec<i32> = encoding.get_ids().iter().map(|&id| id as i32).collect();
+
+    assert!(!period_token_ids.is_empty(), "Should find at least one token for '.'");
+    let period_token_id = period_token_ids[0];
+
+    let regex_pattern = r"[a-zA-Z0-9 ,]+\.?";
+
+    let tokenizer_info_without_stop =
+        TokenizerInfo::from_pretrained(GPT_OSS_20B_PRETRAINED_ID, None, None, None)
+            .expect("Failed to load tokenizer info");
+
+    let compiler = GrammarCompiler::new(&tokenizer_info_without_stop);
+    let compiled_grammar = compiler.compile_regex(regex_pattern).expect("Failed to compile regex");
+
+    let mut matcher_without_stop = GrammarMatcher::with(&compiled_grammar, None, Some(true), None);
+
+    let test_text = "Hello world";
+    let text_encoding = tokenizer.encode(test_text, false).expect("Failed to encode test text");
+
+    for &token_id in text_encoding.get_ids() {
+        let accepted = matcher_without_stop.accept_token(token_id as i32, None);
+        assert!(accepted, "Token should be accepted");
+    }
+
+    let terminated_before_period = matcher_without_stop.is_terminated();
+    let period_accepted = matcher_without_stop.accept_token(period_token_id, None);
+    let terminated_after_period = matcher_without_stop.is_terminated();
+
+    let tokenizer_info_with_stop = TokenizerInfo::from_pretrained(
+        GPT_OSS_20B_PRETRAINED_ID,
+        None,
+        None,
+        Some(period_token_ids.clone()),
+    )
+    .expect("Failed to load tokenizer info with stop tokens");
+
+    let compiler_with_stop = GrammarCompiler::new(&tokenizer_info_with_stop);
+    let compiled_grammar_with_stop = compiler_with_stop
+        .compile_regex(regex_pattern)
+        .expect("Failed to compile regex with stop tokens");
+
+    let mut matcher_with_stop =
+        GrammarMatcher::with(&compiled_grammar_with_stop, None, Some(false), None);
+
+    for &token_id in text_encoding.get_ids() {
+        let accepted = matcher_with_stop.accept_token(token_id as i32, None);
+        assert!(accepted, "Token should be accepted");
+    }
+
+    let terminated_before_stop_token = matcher_with_stop.is_terminated();
+    let period_accepted_with_stop = matcher_with_stop.accept_token(period_token_id, None);
+    let terminated_after_stop_token = matcher_with_stop.is_terminated();
+
+    assert!(
+        terminated_before_period,
+        "Without stop token, matcher should terminate when grammar is complete"
+    );
+    assert!(period_accepted, "Period token should be accepted");
+    assert!(terminated_after_period, "Matcher should still be terminated after accepting period");
+
+    assert!(
+        !terminated_before_stop_token,
+        "With stop token and terminate_without_stop_token=false, matcher should not terminate before stop token"
+    );
+
+    if period_accepted_with_stop {
+        assert!(
+            terminated_after_stop_token,
+            "Matcher should be terminated immediately after accepting stop token"
+        );
+    }
 }

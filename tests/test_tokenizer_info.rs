@@ -1,11 +1,6 @@
 mod common;
 
-use hf_hub::Repo;
-use tokenizers::Tokenizer;
-use xgrammar::{
-    TOKENIZER_ALLOW_PATTERN, TokenizerInfo, VocabType,
-    huggingface_hub::{self, Params, compile_glob_pattern},
-};
+use xgrammar::{TokenizerInfo, VocabType};
 
 // Shared test cases (tokenizer_id, expected_vocab_type, expected_add_prefix_space)
 const TEST_TOKENIZER_CASES: &[(&str, VocabType, bool)] = &[
@@ -59,17 +54,7 @@ fn test_tokenizer_info() {
     for &(tokenizer_id, vocab_type, add_prefix_space) in TEST_TOKENIZER_CASES {
         tracing::info!("Testing tokenizer: {}", tokenizer_id);
 
-        let allow_patterns = compile_glob_pattern(TOKENIZER_ALLOW_PATTERN).unwrap();
-        let download_options =
-            Some(Params { allow_patterns: Some(allow_patterns), ..Default::default() });
-
-        let path = huggingface_hub::snapshot_download(
-            Repo::model(tokenizer_id.to_string()),
-            download_options,
-        )
-        .unwrap();
-        let tokenizer = Tokenizer::from_file(path.join("tokenizer.json").to_str().unwrap())
-            .expect("Failed to load tokenizer from file");
+        let tokenizer = common::load_tokenizer(tokenizer_id).expect("Failed to load tokenizer");
 
         let tokenizer_info = TokenizerInfo::from_pretrained(tokenizer_id, None, None, None)
             .expect("Failed to get tokenizer info");
