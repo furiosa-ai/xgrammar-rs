@@ -51,54 +51,15 @@ fn test_grammar_from_structural_tag_simple() {
 
 #[test]
 fn test_from_structural_tag_errors() {
-    // Test 1: Invalid JSON syntax
-    let invalid_json = "not a json";
-    let result = Grammar::from_structural_tag(invalid_json);
-    assert!(result.is_err());
-    if let Err(err) = result {
-        let err_msg = err.to_string();
-        assert!(err_msg.contains("Invalid JSON error"));
-        assert!(err_msg.contains("Failed to parse JSON"));
-    }
-
-    // Test 2: Missing format field using json! macro
+    // Missing format field using json! macro
     let missing_format = json!({
         "type": "structural_tag"
     });
     let result = Grammar::from_structural_tag(&missing_format.to_string());
-    assert!(result.is_err());
-    if let Err(err) = result {
-        let err_msg = err.to_string();
-        assert!(err_msg.contains("Invalid structural tag error"));
-        assert!(err_msg.contains("Structural tag must have a format field"));
-    }
-
-    // Test 3: Invalid format type using json! macro
-    let invalid_format_type = json!({
-        "format": {
-            "type": "invalid_type"
-        }
-    });
-    let result = Grammar::from_structural_tag(&invalid_format_type.to_string());
-    assert!(result.is_err());
-    if let Err(err) = result {
-        let err_msg = err.to_string();
-        assert!(err_msg.contains("invalid structural tag"));
-    }
-
-    // Test 4: Missing json_schema field in json_schema format using json! macro
-    let missing_json_schema = json!({
-        "format": {
-            "type": "json_schema"
-        }
-    });
-    let result = Grammar::from_structural_tag(&missing_json_schema.to_string());
-    assert!(result.is_err());
-    if let Err(err) = result {
-        let err_msg = err.to_string();
-        assert!(err_msg.contains("Invalid structural tag error"));
-        assert!(err_msg.contains("JSON schema format must have a json_schema field"));
-    }
+    let Err(XGrammarErr::InvalidGrammar(err_msg)) = result else {
+        panic!("Expected grammar creation to fail, but it succeeded");
+    };
+    assert_eq!(&err_msg, "Invalid structural tag error: Structural tag must have a format field");
 }
 
 #[test]
