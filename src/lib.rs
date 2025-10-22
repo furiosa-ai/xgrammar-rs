@@ -85,27 +85,6 @@ pub struct MetadataFromHF {
     pub add_prefix_space: bool,
 }
 
-#[repr(C)]
-pub struct GrammarResult {
-    pub success: bool,
-    pub grammar: Grammar,
-    pub error_message: *mut std::os::raw::c_char,
-}
-
-#[repr(C)]
-pub struct CompiledGrammarResult {
-    pub success: bool,
-    pub compiled_grammar: CompiledGrammar,
-    pub error_message: *mut std::os::raw::c_char,
-}
-
-#[repr(C)]
-pub struct MatcherResult {
-    pub success: bool,
-    pub value: bool,
-    pub error_message: *mut std::os::raw::c_char,
-}
-
 /// Helper function to safely extract and free C++ error message.
 ///
 /// # Safety
@@ -121,6 +100,23 @@ unsafe fn extract_and_free_error_message(error_message_ptr: *mut std::os::raw::c
     }
 }
 
+#[repr(C)]
+pub struct GrammarResult {
+    pub success: bool,
+    pub grammar: Grammar,
+    pub error_message: *mut std::os::raw::c_char,
+}
+
+impl Drop for GrammarResult {
+    fn drop(&mut self) {
+        if !self.error_message.is_null() {
+            unsafe {
+                libc::free(self.error_message as *mut libc::c_void);
+            }
+        }
+    }
+}
+
 impl From<GrammarResult> for Result<Grammar> {
     fn from(result: GrammarResult) -> Self {
         if result.success {
@@ -132,6 +128,23 @@ impl From<GrammarResult> for Result<Grammar> {
     }
 }
 
+#[repr(C)]
+pub struct CompiledGrammarResult {
+    pub success: bool,
+    pub compiled_grammar: CompiledGrammar,
+    pub error_message: *mut std::os::raw::c_char,
+}
+
+impl Drop for CompiledGrammarResult {
+    fn drop(&mut self) {
+        if !self.error_message.is_null() {
+            unsafe {
+                libc::free(self.error_message as *mut libc::c_void);
+            }
+        }
+    }
+}
+
 impl From<CompiledGrammarResult> for Result<CompiledGrammar> {
     fn from(result: CompiledGrammarResult) -> Self {
         if result.success {
@@ -139,6 +152,23 @@ impl From<CompiledGrammarResult> for Result<CompiledGrammar> {
         } else {
             let error_msg = unsafe { extract_and_free_error_message(result.error_message) };
             Err(XGrammarErr::CompilationError(error_msg))
+        }
+    }
+}
+
+#[repr(C)]
+pub struct MatcherResult {
+    pub success: bool,
+    pub value: bool,
+    pub error_message: *mut std::os::raw::c_char,
+}
+
+impl Drop for MatcherResult {
+    fn drop(&mut self) {
+        if !self.error_message.is_null() {
+            unsafe {
+                libc::free(self.error_message as *mut libc::c_void);
+            }
         }
     }
 }
@@ -1072,25 +1102,16 @@ impl Grammar {
             .expect("Failed to convert structural_tag_json to CString");
         let structural_tag_json_ptr = structural_tag_json_cstring.as_ptr();
 
-        // We use separate variables to capture success flag and error message
-        let mut success: i32 = 0;
-        let mut error_msg_ptr: *mut std::os::raw::c_char = std::ptr::null_mut();
-
-        let grammar = cpp!(unsafe [
-            structural_tag_json_ptr as "const char*",
-            mut success as "int",
-            mut error_msg_ptr as "char*"
-        ] -> Grammar as "xgrammar::Grammar" {
+        let result = cpp!(unsafe [
+            structural_tag_json_ptr as "const char*"
+        ] -> GrammarResult as "GrammarResult" {
             std::string structural_tag_json_str(structural_tag_json_ptr);
             auto result = xgrammar::Grammar::FromStructuralTag(structural_tag_json_str);
 
             // Check if result holds a Grammar or an error
             if (std::holds_alternative<xgrammar::Grammar>(result)) {
-                success = 1;
-                error_msg_ptr = nullptr;
-                return std::get<xgrammar::Grammar>(result);
+                return {true, std::get<xgrammar::Grammar>(result), nullptr};
             } else {
-                success = 0;
                 auto error = std::get<xgrammar::StructuralTagError>(result);
 
                 // Extract error message from the variant
@@ -1100,22 +1121,14 @@ impl Grammar {
                 }, error);
 
                 // Allocate and copy error message
-                error_msg_ptr = strdup(error_msg.c_str());
-
-                // Return a null grammar
-                return xgrammar::Grammar(xgrammar::NullObj{});
+                return {false, Grammar(NullObj()), strdup(error_msg.c_str())};
             }
         });
 
-        if success == 1 {
-            Ok(grammar)
+        if result.success {
+            Ok(result.grammar)
         } else {
-            let error_msg = if !error_msg_ptr.is_null() {
-                let c_str = unsafe { CString::from_raw(error_msg_ptr) };
-                c_str.to_string_lossy().into_owned()
-            } else {
-                "Unknown error".to_string()
-            };
+            let error_msg = unsafe { extract_and_free_error_message(result.error_message) };
             Err(XGrammarErr::InvalidStructuralTag(error_msg))
         }
     }
