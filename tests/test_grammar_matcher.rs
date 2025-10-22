@@ -137,7 +137,9 @@ fn test_matcher_accept_string_and_bitmask() {
     let mut dl_tensor = SafeManagedTensorVersioned::new(bitmask).unwrap();
 
     // The bitmask should be modified
-    let needs_application = matcher.fill_next_token_bitmask(&mut dl_tensor, None, None);
+    let needs_application = matcher
+        .fill_next_token_bitmask(&mut dl_tensor, None, None)
+        .expect("fill_next_token_bitmask should succeed");
     assert!(needs_application, "Bitmask should need application for a partial match");
 
     // Verify that the bitmask is no longer all zeros.
@@ -164,5 +166,111 @@ fn test_matcher_accept_string_and_bitmask() {
     assert!(
         !matcher.accept_string("a", None),
         "Matcher should not accept any more tokens after termination"
+    );
+}
+
+/// Test rollback with valid and invalid cases
+#[test]
+fn test_matcher_rollback() {
+    use xgrammar::XGrammarErr;
+
+    // Setup: Compile a simple JSON grammar
+    let tokenizer_info =
+        TokenizerInfo::from_pretrained(GPT_OSS_20B_PRETRAINED_ID, None, None, None)
+            .expect("Failed to load tokenizer info");
+    let compiler = GrammarCompiler::new(&tokenizer_info);
+    let compiled_grammar =
+        compiler.compile_builtin_json_grammar().expect("Failed to compile builtin JSON grammar");
+
+    // Set max_rollback_tokens to 3 for testing
+    let mut matcher = GrammarMatcher::with(&compiled_grammar, None, Some(true), Some(3));
+
+    // Initial state: no tokens accepted yet
+    assert!(!matcher.is_terminated(), "Matcher should not be terminated initially");
+
+    // Test 1: Try to rollback when no tokens have been accepted
+    let result = matcher.rollback(Some(1));
+    assert!(result.is_err(), "Should fail to rollback when no tokens have been accepted");
+    if let Err(XGrammarErr::MatcherError(err_msg)) = result {
+        assert!(err_msg.contains(
+            "Intended to rollback 1 tokens, but only the last 0 steps of history are saved"
+        ));
+    } else {
+        panic!("Expected MatcherError");
+    }
+
+    // Test 2: Accept some tokens
+    assert!(matcher.accept_string("{\"key\":", None), "Should accept partial JSON");
+    assert!(matcher.accept_string("\"value\"", None), "Should accept string value");
+    assert!(matcher.accept_string("}", None), "Should accept closing brace");
+    assert!(matcher.is_terminated(), "Matcher should be terminated after complete JSON");
+
+    // Test 3: Rollback 1 token (valid)
+    let result = matcher.rollback(Some(1));
+    assert!(result.is_ok(), "Should successfully rollback 1 token");
+    assert!(!matcher.is_terminated(), "Matcher should not be terminated after rollback");
+
+    // Test 4: Rollback 2 more tokens (valid)
+    let result = matcher.rollback(Some(2));
+    assert!(result.is_ok(), "Should successfully rollback 2 tokens");
+
+    // Test 5: Try to rollback more tokens than available
+    // We've accepted 3 tokens and rolled back 3, so no history left
+    let result = matcher.rollback(Some(1));
+    assert!(result.is_err(), "Should fail to rollback when no history is left");
+    if let Err(XGrammarErr::MatcherError(err_msg)) = result {
+        assert!(
+            err_msg.contains("Intended to rollback") && err_msg.contains("but only the last"),
+            "Error message should indicate rollback out of range, got: {}",
+            err_msg
+        );
+    } else {
+        panic!("Expected MatcherError");
+    }
+}
+
+/// Test fill_next_token_bitmask error handling
+#[test]
+fn test_fill_next_token_bitmask_error() {
+    use dlpark::prelude::*;
+    use xgrammar::XGrammarErr;
+
+    // Setup: Compile a simple JSON grammar
+    let tokenizer_info =
+        TokenizerInfo::from_pretrained(GPT_OSS_20B_PRETRAINED_ID, None, None, None)
+            .expect("Failed to load tokenizer info");
+    let compiler = GrammarCompiler::new(&tokenizer_info);
+    let compiled_grammar =
+        compiler.compile_builtin_json_grammar().expect("Failed to compile builtin JSON grammar");
+
+    // Set terminate_without_stop_token to false and provide a stop token
+    // This ensures that is_terminated() only returns true after accepting a stop token
+    let stop_token_ids = vec![tokenizer_info.get_vocab_size()]; // Use an out-of-vocab token as stop
+    let mut matcher =
+        GrammarMatcher::with(&compiled_grammar, Some(&stop_token_ids), Some(false), None);
+
+    // Accept a complete valid JSON string
+    assert!(matcher.accept_string("{\"key\":\"value\"}", None), "Should accept valid JSON");
+
+    // At this point, the matcher has completed the grammar but not terminated (no stop token yet)
+    // We need to simulate accepting a stop token to make IsStopTokenAccepted() return true
+    // For this test, let's use a different approach: test with invalid bitmask parameters
+
+    // Test: Try to fill bitmask with invalid parameters (wrong dtype/shape)
+    // Create a bitmask with wrong size
+    let wrong_bitmask_len = 10; // Too small
+    let bitmask =
+        ArrayD::from_shape_vec(IxDyn(&[1, wrong_bitmask_len]), vec![0i32; wrong_bitmask_len])
+            .expect("fail to create a bitmask");
+    let mut dl_tensor = SafeManagedTensorVersioned::new(bitmask).unwrap();
+
+    let result = matcher.fill_next_token_bitmask(&mut dl_tensor, None, None);
+
+    let Err(XGrammarErr::MatcherError(err_msg)) = result else {
+        panic!("Expected MatcherError");
+    };
+    // The error should be about bitmask size/shape mismatch
+    assert!(
+        err_msg.contains("The provided bitmask's shape is not valid: should be (batch_size, 6251)")
     );
 }

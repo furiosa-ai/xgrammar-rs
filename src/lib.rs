@@ -65,6 +65,12 @@ cpp! {{
         CompiledGrammar compiled_grammar;
         char* error_message;
     };
+
+    struct MatcherResult {
+        bool success;
+        bool value;
+        char* error_message;
+    };
 }}
 
 cpp_class!(
@@ -109,6 +115,13 @@ pub struct GrammarResult {
 pub struct CompiledGrammarResult {
     pub success: bool,
     pub compiled_grammar: CompiledGrammar,
+    pub error_message: *mut std::os::raw::c_char,
+}
+
+#[repr(C)]
+pub struct MatcherResult {
+    pub success: bool,
+    pub value: bool,
     pub error_message: *mut std::os::raw::c_char,
 }
 
@@ -1365,20 +1378,41 @@ impl GrammarMatcher {
     /// * `debug_print` - If true, print debug information.
     ///
     /// # Returns
-    /// * Whether the bitmask need to be applied (not all-true).
+    /// * `Ok(bool)` - Whether the bitmask need to be applied (not all-true).
+    /// * `Err(XGrammarErr)` - Error if the operation fails (e.g., matcher terminated, invalid bitmask).
+    ///
+    /// # Errors
+    /// * Returns error if the matcher has terminated after accepting the stop token
+    /// * Returns error if the bitmask has invalid dtype, shape, or device type
     pub fn fill_next_token_bitmask(
         &mut self,
         next_token_bitmask: &mut DLTensor,
         index: Option<usize>,
         debug_print: Option<bool>,
-    ) -> bool {
+    ) -> Result<bool> {
         let dl_tensor = next_token_bitmask.dl_tensor();
         let index = index.unwrap_or(0) as i32;
         let debug_print = debug_print.unwrap_or(false);
 
-        cpp!(unsafe [self as "xgrammar::GrammarMatcher*", dl_tensor as "DLTensor*", index as "int32_t", debug_print as "bool"] -> bool as "bool" {
-            return self->FillNextTokenBitmask(dl_tensor, index, debug_print);
-        })
+        let result = cpp!(unsafe [self as "xgrammar::GrammarMatcher*", dl_tensor as "DLTensor*", index as "int32_t", debug_print as "bool"] -> MatcherResult as "MatcherResult" {
+            try {
+                bool value = self->FillNextTokenBitmask(dl_tensor, index, debug_print);
+                return {true, value, nullptr};
+            } catch (const std::exception& e) {
+                return {false, false, strdup(e.what())};
+            }
+        });
+
+        if result.success {
+            Ok(result.value)
+        } else {
+            let error_msg = unsafe {
+                let msg = CStr::from_ptr(result.error_message).to_string_lossy().into_owned();
+                libc::free(result.error_message as *mut libc::c_void);
+                msg
+            };
+            Err(XGrammarErr::MatcherError(error_msg))
+        }
     }
 
     /// Rollback the matcher to a previous state.
@@ -1386,11 +1420,35 @@ impl GrammarMatcher {
     /// # Arguments
     /// * `num_tokens` - The number of tokens to rollback. It cannot exceed the current number of
     ///   steps, nor can it exceed the specified maximum number of rollback tokens.
-    pub fn rollback(&mut self, num_tokens: Option<i32>) {
+    ///
+    /// # Returns
+    /// * `Ok(())` - If the rollback succeeds
+    /// * `Err(XGrammarErr)` - Error if the rollback fails (e.g., num_tokens exceeds history)
+    ///
+    /// # Errors
+    /// * Returns error if num_tokens exceeds the number of saved history steps
+    pub fn rollback(&mut self, num_tokens: Option<i32>) -> Result<()> {
         let num_tokens = num_tokens.unwrap_or(1);
-        cpp!(unsafe [self as "xgrammar::GrammarMatcher*", num_tokens as "int"] {
-            self->Rollback(num_tokens);
-        })
+
+        let result = cpp!(unsafe [self as "xgrammar::GrammarMatcher*", num_tokens as "int"] -> MatcherResult as "MatcherResult" {
+            try {
+                self->Rollback(num_tokens);
+                return {true, false, nullptr};
+            } catch (const std::exception& e) {
+                return {false, false, strdup(e.what())};
+            }
+        });
+
+        if result.success {
+            Ok(())
+        } else {
+            let error_msg = unsafe {
+                let msg = CStr::from_ptr(result.error_message).to_string_lossy().into_owned();
+                libc::free(result.error_message as *mut libc::c_void);
+                msg
+            };
+            Err(XGrammarErr::MatcherError(error_msg))
+        }
     }
 
     /// Check if the matcher has accepted the stop token and terminated.

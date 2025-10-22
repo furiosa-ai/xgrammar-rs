@@ -23,4 +23,6 @@ pub enum XGrammarErr {
     InvalidGrammar(String),
     #[error("compilation error: {0}")]
     CompilationError(String),
+    #[error("matcher error: {0}")]
+    MatcherError(String),
 }
