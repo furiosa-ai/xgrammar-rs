@@ -101,7 +101,7 @@ unsafe fn extract_and_free_error_message(error_message_ptr: *mut std::os::raw::c
 }
 
 #[repr(C)]
-pub struct GrammarResult {
+pub(crate) struct GrammarResult {
     pub success: bool,
     pub grammar: Grammar,
     pub error_message: *mut std::os::raw::c_char,
@@ -136,7 +136,7 @@ impl From<GrammarResult> for Result<Grammar> {
 }
 
 #[repr(C)]
-pub struct CompiledGrammarResult {
+pub(crate) struct CompiledGrammarResult {
     pub success: bool,
     pub compiled_grammar: CompiledGrammar,
     pub error_message: *mut std::os::raw::c_char,
@@ -171,7 +171,7 @@ impl From<CompiledGrammarResult> for Result<CompiledGrammar> {
 }
 
 #[repr(C)]
-pub struct MatcherResult {
+pub(crate) struct MatcherResult {
     pub success: bool,
     pub value: bool,
     pub error_message: *mut std::os::raw::c_char,
