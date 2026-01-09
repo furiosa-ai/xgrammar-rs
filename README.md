@@ -1,5 +1,7 @@
 # xgrammar-rs
 
+This project uses [xgrammar](https://github.com/mlc-ai/xgrammar) **v0.1.29** as a submodule.
+
 [![CI](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/ci.yml) [![Deploy Docs](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/docs.yml/badge.svg)](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/docs.yml)
 
 This project provides safe and idiomatic Rust bindings for the `xgrammar` C++ library.
@@ -13,7 +15,7 @@ Before building the project, ensure you have the following dependencies installe
 
 -   **Rust toolchain**: Install via [rustup](https://rustup.rs/).
 -   **CMake**: Required to build the underlying C++ `xgrammar` library.
--   **C++ compiler**: A modern C++ compiler that supports C++17 (Clang is hightly recommended.)
+-   **C++ compiler**: A modern C++ compiler that supports C++17 (Clang is highly recommended.)
 
 ## Build
 
