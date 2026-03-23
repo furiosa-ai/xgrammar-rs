@@ -20,7 +20,6 @@ fn main() {
     // Note: -Wno-deprecated-declarations is needed because xgrammar uses std::bind internally,
     // which triggers deprecation warnings for std::result_of in C++17 with newer compilers.
     let xgrammar = cmake::Config::new("thirdparty/xgrammar")
-        .define("CMAKE_CXX_COMPILER", "clang++")
         .define("CMAKE_CXX_FLAGS", "-Wno-deprecated-declarations")
         .build_target("xgrammar")
         .build();
