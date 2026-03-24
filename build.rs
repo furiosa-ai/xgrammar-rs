@@ -19,9 +19,17 @@ fn main() {
     // Running the CMake build for the xgrammar library
     // Note: -Wno-deprecated-declarations is needed because xgrammar uses std::bind internally,
     // which triggers deprecation warnings for std::result_of in C++17 with newer compilers.
+    // Note: -fno-lto is needed on AArch64, due to default linker differences on Rust among
+    // x86_64 and others.
+    // See https://blog.rust-lang.org/2025/09/01/rust-lld-on-1.90.0-stable/ for details.
+    #[cfg(target_arch = "x86_64")]
+    let cxx_flags: &str = "-Wno-deprecated-declarations";
+    #[cfg(not(target_arch = "x86_64"))]
+    let cxx_flags: &str = "-Wno-deprecated-declarations -fno-lto";
+
     let xgrammar = cmake::Config::new("thirdparty/xgrammar")
         .define("CMAKE_CXX_COMPILER", "clang++")
-        .define("CMAKE_CXX_FLAGS", "-Wno-deprecated-declarations")
+        .define("CMAKE_CXX_FLAGS", cxx_flags)
         .build_target("xgrammar")
         .build();
 
