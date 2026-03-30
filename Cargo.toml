@@ -1,6 +1,6 @@
 [package]
 name = "xgrammar"
-version = "0.3.1"
+version = "0.3.2"
 authors = ["Hyunsik Choi <hyunsik@furiosa.ai>"]
 description = "Rust bindings for XGrammar"
 edition = "2024"
