@@ -21,6 +21,7 @@ for constraint decoding.
   `batch_fill_next_token_bitmask` (parallel, thread-pool-backed),
   `batch_accept_token`, `batch_accept_string`, `batch_rollback`
   (sequential static helpers).
+- Linux `x86_64` and `aarch64` (arm64) are both supported.
 
 See the [rustdoc](https://docs.rs/xgrammar/latest/xgrammar/) for detailed method-level documentation, including when a
 `BatchGrammarMatcher` instance is required vs when associated functions can be

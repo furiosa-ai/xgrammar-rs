@@ -450,17 +450,22 @@ impl TokenizerInfo {
         ] {
             const auto& vocab = self->GetDecodedVocab();
             for (const auto& s : vocab) {
-                const char* data = s.data();
+                // Marshal as `uint8_t*` so the Rust side receives `*const u8`
+                // directly, avoiding a `c_char`→`u8` cast whose necessity
+                // varies by platform (c_char is i8 on x86_64 but u8 on arm64,
+                // which makes the cast trigger `clippy::unnecessary_cast`
+                // on arm64).
+                const uint8_t* data = reinterpret_cast<const uint8_t*>(s.data());
                 size_t len = s.size();
                 rust!(XGR_TokInfo_DecodedVocab_push [
                     out_ptr: *mut Vec<String> as "void*",
-                    data: *const std::os::raw::c_char as "const char*",
+                    data: *const u8 as "const uint8_t*",
                     len: usize as "size_t"
                 ] {
                     // SAFETY: `data`/`len` point into the C++ std::string; the
                     // slice is only read during this call. `out_ptr` was
                     // obtained from a live `&mut Vec<String>` on the Rust side.
-                    let slice = unsafe { std::slice::from_raw_parts(data as *const u8, len) };
+                    let slice = unsafe { std::slice::from_raw_parts(data, len) };
                     // Must be `from_utf8_lossy`, not `from_utf8_unchecked`:
                     // xgrammar's ByteFallback / ByteLevel decoders (see
                     // thirdparty/xgrammar/cpp/tokenizer_info.cc `DecodeToken`)
