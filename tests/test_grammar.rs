@@ -43,7 +43,7 @@ fn test_grammar_from_structural_tag_simple() {
         }
     });
 
-    let result = Grammar::from_structural_tag(&structural_tag_json.to_string());
+    let result = Grammar::from_structural_tag(&structural_tag_json.to_string(), None);
     assert!(result.is_ok());
     let grammar = result.unwrap();
     assert!(!grammar.is_null());
@@ -55,7 +55,7 @@ fn test_from_structural_tag_errors() {
     let missing_format = json!({
         "type": "structural_tag"
     });
-    let result = Grammar::from_structural_tag(&missing_format.to_string());
+    let result = Grammar::from_structural_tag(&missing_format.to_string(), None);
     let Err(XGrammarErr::InvalidGrammar(err_msg)) = result else {
         panic!("Expected grammar creation to fail, but it succeeded");
     };

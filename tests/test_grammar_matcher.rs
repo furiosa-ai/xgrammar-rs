@@ -344,3 +344,74 @@ fn test_stop_token_early_termination() {
         );
     }
 }
+
+/// Test that `is_completed` returns true once the root rule is fully matched,
+/// even though the stop token has not been accepted yet.
+#[test]
+fn test_matcher_is_completed_without_stop_token() {
+    let tokenizer_info =
+        TokenizerInfo::from_pretrained(GPT_OSS_20B_PRETRAINED_ID, None, None, None)
+            .expect("Failed to load tokenizer info");
+    let compiler = GrammarCompiler::new(&tokenizer_info);
+    let compiled_grammar =
+        compiler.compile_builtin_json_grammar().expect("Failed to compile builtin JSON grammar");
+    // terminate_without_stop_token = false: matcher does NOT auto-terminate when root rule matches.
+    let mut matcher = GrammarMatcher::with(&compiled_grammar, None, Some(false), None);
+
+    assert!(!matcher.is_completed());
+    assert!(!matcher.is_terminated());
+
+    assert!(matcher.accept_string("{\"name\":\"John\"}", None));
+    assert!(matcher.is_completed(), "grammar root rule fully matched");
+    assert!(!matcher.is_terminated(), "stop token not yet accepted");
+}
+
+/// Test that `fork` creates an independent deep copy of the matcher state.
+#[test]
+fn test_matcher_fork_is_deep_copy() {
+    let tokenizer_info =
+        TokenizerInfo::from_pretrained(GPT_OSS_20B_PRETRAINED_ID, None, None, None)
+            .expect("Failed to load tokenizer info");
+    let compiler = GrammarCompiler::new(&tokenizer_info);
+    let compiled_grammar =
+        compiler.compile_builtin_json_grammar().expect("Failed to compile builtin JSON grammar");
+    let mut matcher = GrammarMatcher::with(&compiled_grammar, None, Some(true), None);
+
+    // Drive to an open JSON object.
+    assert!(matcher.accept_string("{\"a\":", None));
+
+    // Fork — both branches should be independently valid.
+    let mut forked = matcher.fork();
+    assert!(matcher.accept_string("1}", None));
+    assert!(matcher.is_terminated());
+
+    assert!(!forked.is_terminated(), "forked matcher should retain pre-fork state");
+    assert!(forked.accept_string("\"x\"}", None));
+    assert!(forked.is_terminated());
+}
+
+/// Regression test for `GrammarMatcher::get_stop_token_ids` and `TokenizerInfo::get_decoded_vocab`
+/// — both previously relied on Rust `Vec<T>` / C++ `std::vector<T>` layout compatibility,
+/// which is NOT guaranteed on libstdc++. They now use an explicit size+data-pointer
+/// marshalling path; this test ensures the result is sane.
+#[test]
+fn test_vector_returning_getters_do_not_crash() {
+    let tokenizer_info =
+        TokenizerInfo::from_pretrained(GPT_OSS_20B_PRETRAINED_ID, None, None, None)
+            .expect("Failed to load tokenizer info");
+    let vocab_size = tokenizer_info.get_vocab_size();
+    let decoded_vocab = tokenizer_info.get_decoded_vocab();
+    assert_eq!(decoded_vocab.len(), vocab_size as usize);
+
+    let compiler = GrammarCompiler::new(&tokenizer_info);
+    let compiled_grammar =
+        compiler.compile_builtin_json_grammar().expect("Failed to compile builtin JSON grammar");
+    let matcher = GrammarMatcher::with(&compiled_grammar, None, Some(true), None);
+    let stop_ids = matcher.get_stop_token_ids();
+    // We don't know the exact set, but it should be a small non-empty list and every id should
+    // fit in the tokenizer vocab range.
+    assert!(!stop_ids.is_empty(), "expected at least one stop token");
+    for id in &stop_ids {
+        assert!(*id >= 0 && *id < vocab_size, "stop id {id} out of vocab range");
+    }
+}

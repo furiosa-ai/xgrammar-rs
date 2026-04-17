@@ -1,6 +1,6 @@
 # xgrammar-rs
 
-This project uses [xgrammar](https://github.com/mlc-ai/xgrammar) **v0.1.29** as a submodule.
+This project uses [xgrammar](https://github.com/mlc-ai/xgrammar) **v0.1.33** as a submodule.
 
 [![CI](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/ci.yml) [![Deploy Docs](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/docs.yml/badge.svg)](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/docs.yml)
 
@@ -8,6 +8,24 @@ This project provides safe and idiomatic Rust bindings for the `xgrammar` C++ li
 By wrapping the C++ implementation, this crate leverages Rust's memory safety
 andguarantees while providing access to `xgrammar`'s high-performance and features
 for constraint decoding.
+
+## Highlights
+
+- `Grammar`, `GrammarCompiler`, `CompiledGrammar`, `TokenizerInfo` — core API
+  for compiling grammars (BNF, JSON schema, regex, structural tags) against a
+  tokenizer.
+- `GrammarMatcher` — token-by-token constrained decoding, including
+  `is_completed()` (root-rule match without stop token) and `fork()` for
+  speculative / branching decoding.
+- `BatchGrammarMatcher` — batched helpers operating on a slice of matchers:
+  `batch_fill_next_token_bitmask` (parallel, thread-pool-backed),
+  `batch_accept_token`, `batch_accept_string`, `batch_rollback`
+  (sequential static helpers).
+- Linux `x86_64` and `aarch64` (arm64) are both supported.
+
+See the [rustdoc](https://docs.rs/xgrammar/latest/xgrammar/) for detailed method-level documentation, including when a
+`BatchGrammarMatcher` instance is required vs when associated functions can be
+called directly.
 
 ## Prerequisites
 
