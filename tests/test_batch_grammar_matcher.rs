@@ -32,25 +32,41 @@ fn test_batch_accept_string() {
 
 #[test]
 fn test_batch_accept_token_matches_single_matcher() {
-    // batch_accept_token should produce the same result as per-matcher accept_token.
-    let (_tokenizer_info, mut matchers) = setup_matchers(2);
-    let (_ti2, mut reference) = setup_matchers(2);
+    // batch_accept_token should produce the same per-matcher results as
+    // calling accept_token on each matcher individually — for any input, at
+    // any matcher state. We drive the batch and reference matchers through
+    // identical prefills, then issue the same batch of token ids and compare.
+    let (_tokenizer_info, mut matchers) = setup_matchers(3);
+    let (_ti2, mut reference) = setup_matchers(3);
 
-    // Pick a token id that is a valid JSON starter ("{" is ASCII 0x7B = 123 — but token ids are
-    // model-specific). Fall back to a universally-accepted '{' via accept_string first, then
-    // exercise batch_accept_token on a known token that all matchers reject so results compare.
-    //
-    // For correctness, use a token id that is out of the tokenizer's vocab range → both paths
-    // should reject it deterministically.
+    // Prefill each matcher pair to a distinct state.
+    // matcher 0: fresh (empty)
+    // matcher 1: mid-JSON (`{"a":`)
+    // matcher 2: fully matched (`{"a":1}`, terminated)
+    for m in [&mut matchers, &mut reference] {
+        assert!(m[1].accept_string("{\"a\":", None));
+        assert!(m[2].accept_string("{\"a\":1}", None));
+        assert!(m[2].is_terminated());
+    }
+
+    // Exercise the batch with an out-of-range token id — every matcher must
+    // reject it deterministically — and compare element-by-element against the
+    // single-matcher path.
     let invalid_token: i32 = -1;
-    let batch_results = BatchGrammarMatcher::batch_accept_token(
-        &mut matchers,
-        &[invalid_token, invalid_token],
-        None,
-    );
-    let ref_results: Vec<bool> =
-        reference.iter_mut().map(|m| m.accept_token(invalid_token, None)).collect();
-    assert_eq!(batch_results, ref_results);
+    let token_ids = vec![invalid_token; matchers.len()];
+    let batch_results = BatchGrammarMatcher::batch_accept_token(&mut matchers, &token_ids, None);
+    let ref_results: Vec<bool> = reference
+        .iter_mut()
+        .zip(token_ids.iter())
+        .map(|(m, &id)| m.accept_token(id, None))
+        .collect();
+    assert_eq!(batch_results, ref_results, "batch and per-matcher paths must agree");
+
+    // Post-call state must match as well (batch must not have silently advanced
+    // or rolled back any matcher beyond what the single-matcher path did).
+    for (b, r) in matchers.iter().zip(reference.iter()) {
+        assert_eq!(b.is_terminated(), r.is_terminated());
+    }
 }
 
 #[test]
