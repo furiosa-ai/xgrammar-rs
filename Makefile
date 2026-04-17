@@ -1,10 +1,10 @@
 install-cargo-deps:
 	rustup component add clippy rustfmt
 	curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
-	cargo binstall -y cargo-nextest cargo-machete cargo-sort
+	cargo binstall -y cargo-nextest cargo-shear cargo-sort
 
 lint:
-	cargo machete
+	cargo shear
 	cargo sort --grouped --check --workspace
 	cargo fmt --all --check
 

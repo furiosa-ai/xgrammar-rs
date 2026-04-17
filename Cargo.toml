@@ -27,7 +27,6 @@ tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
 
 [build-dependencies]
-bindgen = "0.72.0"
 cmake = "0.1.54"
 cpp_build = "0.5.10"
 
