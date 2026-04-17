@@ -69,6 +69,9 @@ cpp_class!(
 cpp_class!(
     pub unsafe struct GrammarMatcher as "xgrammar::GrammarMatcher"
 );
+cpp_class!(
+    pub unsafe struct BatchGrammarMatcher as "xgrammar::BatchGrammarMatcher"
+);
 
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -410,9 +413,36 @@ impl TokenizerInfo {
 
     // const std::vector<std::string>& GetDecodedVocab() const;
     pub fn get_decoded_vocab(&self) -> Vec<String> {
-        cpp!(unsafe [self as "const xgrammar::TokenizerInfo*"] -> Vec<String> as "std::vector<std::string>" {
-            return self->GetDecodedVocab();
-        })
+        // Avoid relying on layout-compatibility between `Vec<T>` and `std::vector<T>`
+        // (Rust Vec is (ptr, cap, len); libstdc++ std::vector is (start, finish,
+        // end_of_storage) — different semantics for the second/third word). Instead
+        // the C++ side writes each element into a Rust-allocated `Vec<String>` via
+        // the `vec_push_string` callback bridge.
+        let mut out: Vec<String> = Vec::new();
+        let out_ptr = &mut out as *mut Vec<String>;
+        cpp!(unsafe [
+            self as "const xgrammar::TokenizerInfo*",
+            out_ptr as "void*"
+        ] {
+            const auto& vocab = self->GetDecodedVocab();
+            for (const auto& s : vocab) {
+                const char* data = s.data();
+                size_t len = s.size();
+                rust!(XGR_TokInfo_DecodedVocab_push [
+                    out_ptr: *mut Vec<String> as "void*",
+                    data: *const std::os::raw::c_char as "const char*",
+                    len: usize as "size_t"
+                ] {
+                    // SAFETY: `data`/`len` point into the C++ std::string; the
+                    // slice is only read during this call. `out_ptr` was
+                    // obtained from a live `&mut Vec<String>` on the Rust side.
+                    let slice = unsafe { std::slice::from_raw_parts(data as *const u8, len) };
+                    let s = String::from_utf8_lossy(slice).into_owned();
+                    unsafe { (*out_ptr).push(s) };
+                });
+            }
+        });
+        out
     }
 
     fn detect_metadata_from_hf(backend_str: &str) -> MetadataFromHF {
@@ -1085,6 +1115,11 @@ impl Grammar {
     /// * `structural_tag_json` - A JSON string specifying the structural tag configuration.
     ///   The JSON should contain structural tag items with `begin`, `schema`, and `end` fields,
     ///   and optionally `triggers` for grammar dispatching.
+    /// * `tokenizer_info` - Optional `TokenizerInfo` for resolving string token references.
+    ///   Required when the structural tag JSON uses token-level formats introduced in
+    ///   xgrammar >= 0.1.33 (e.g. `type: "token"`, `type: "exclude_token"`,
+    ///   `type: "any_tokens"`, `type: "token_triggered_tags"`). Pass `None` for pure
+    ///   character-level tag formats.
     ///
     /// # Returns
     /// * `Ok(Grammar)` if the JSON is valid and the grammar was successfully created
@@ -1120,19 +1155,31 @@ impl Grammar {
     ///     }
     /// });
     ///
-    /// let grammar = Grammar::from_structural_tag(&structural_tag.to_string()).unwrap();
+    /// let grammar = Grammar::from_structural_tag(&structural_tag.to_string(), None).unwrap();
     /// assert!(!grammar.is_null());
     /// ```
-    pub fn from_structural_tag(structural_tag_json: &str) -> Result<Self> {
+    pub fn from_structural_tag(
+        structural_tag_json: &str,
+        tokenizer_info: Option<&TokenizerInfo>,
+    ) -> Result<Self> {
         let structural_tag_json_cstring = CString::new(structural_tag_json)
             .expect("Failed to convert structural_tag_json to CString");
         let structural_tag_json_ptr = structural_tag_json_cstring.as_ptr();
+        let tokenizer_info_ptr: *const TokenizerInfo =
+            tokenizer_info.map(|t| t as *const TokenizerInfo).unwrap_or(std::ptr::null());
 
         let result = cpp!(unsafe [
-            structural_tag_json_ptr as "const char*"
+            structural_tag_json_ptr as "const char*",
+            tokenizer_info_ptr as "const xgrammar::TokenizerInfo*"
         ] -> GrammarResult as "GrammarResult" {
             std::string structural_tag_json_str(structural_tag_json_ptr);
-            auto result = xgrammar::Grammar::FromStructuralTag(structural_tag_json_str);
+            std::optional<xgrammar::TokenizerInfo> opt_tokenizer_info;
+            if (tokenizer_info_ptr != nullptr) {
+                opt_tokenizer_info = *tokenizer_info_ptr;
+            }
+            auto result = xgrammar::Grammar::FromStructuralTag(
+                structural_tag_json_str, opt_tokenizer_info
+            );
 
             // Check if result holds a Grammar or an error
             if (std::holds_alternative<xgrammar::Grammar>(result)) {
@@ -1442,6 +1489,15 @@ impl GrammarMatcher {
         })
     }
 
+    /// Check if the grammar's root rule has been fully matched by the input accepted
+    /// so far. Unlike [`Self::is_terminated`], this does not require the stop token
+    /// to have been accepted.
+    pub fn is_completed(&self) -> bool {
+        cpp!(unsafe [self as "const xgrammar::GrammarMatcher*"] -> bool as "bool" {
+            return self->IsCompleted();
+        })
+    }
+
     /// Get the maximum number of rollback tokens allowed.
     pub fn get_max_rollback_tokens(&self) -> i32 {
         cpp!(unsafe [self as "const xgrammar::GrammarMatcher*"] -> i32 as "int" {
@@ -1450,9 +1506,26 @@ impl GrammarMatcher {
     }
 
     pub fn get_stop_token_ids(&self) -> Vec<i32> {
-        cpp!(unsafe [self as "const xgrammar::GrammarMatcher*"] -> Vec<i32> as "std::vector<int>" {
-            return self->GetStopTokenIds();
-        })
+        // Avoid relying on layout-compatibility between `Vec<T>` and
+        // `std::vector<T>` — the two have different memory layouts on
+        // libstdc++. Instead marshal the C++ vector's size + data pointer
+        // through, then copy into a Rust `Vec<i32>`.
+        let mut size: usize = 0;
+        let mut data_ptr: *const i32 = std::ptr::null();
+        let size_ptr = &mut size as *mut usize;
+        let data_pp = &mut data_ptr as *mut *const i32;
+        cpp!(unsafe [
+            self as "const xgrammar::GrammarMatcher*",
+            size_ptr as "size_t*",
+            data_pp as "const int**"
+        ] {
+            const auto& ids = self->GetStopTokenIds();
+            *size_ptr = ids.size();
+            *data_pp = ids.data();
+        });
+        // SAFETY: `data_ptr` points into the GrammarMatcher-owned vector,
+        // valid until the next mutation; we copy out before returning.
+        unsafe { std::slice::from_raw_parts(data_ptr, size) }.to_vec()
     }
 
     /// Reset the matcher to the initial state.
@@ -1460,5 +1533,224 @@ impl GrammarMatcher {
         cpp!(unsafe [self as "xgrammar::GrammarMatcher*"] {
             self->Reset();
         })
+    }
+
+    /// Deep-copy the matcher. The returned matcher shares the `CompiledGrammar`
+    /// and `TokenizerInfo` with `self` but has independent state. Useful for
+    /// speculative decoding and branching search — `self` is unchanged.
+    pub fn fork(&self) -> GrammarMatcher {
+        cpp!(unsafe [self as "const xgrammar::GrammarMatcher*"]
+            -> GrammarMatcher as "xgrammar::GrammarMatcher"
+        {
+            return self->Fork();
+        })
+    }
+}
+
+impl BatchGrammarMatcher {
+    /// Create a BatchGrammarMatcher with the default `"auto"` thread policy.
+    pub fn new() -> Self {
+        cpp!(unsafe [] -> BatchGrammarMatcher as "xgrammar::BatchGrammarMatcher" {
+            return xgrammar::BatchGrammarMatcher(std::string("auto"));
+        })
+    }
+
+    /// Create a BatchGrammarMatcher with an explicit maximum thread count.
+    pub fn with(max_threads: i32) -> Self {
+        cpp!(unsafe [max_threads as "int32_t"]
+            -> BatchGrammarMatcher as "xgrammar::BatchGrammarMatcher"
+        {
+            return xgrammar::BatchGrammarMatcher(max_threads);
+        })
+    }
+
+    /// Batched version of [`GrammarMatcher::fill_next_token_bitmask`].
+    ///
+    /// # Arguments
+    /// * `matchers` - The matchers to operate on in parallel. Mutated in place.
+    /// * `next_token_bitmask` - Pre-allocated `DLTensor` with shape `(N, bitmask_len)` and
+    ///   dtype `int32`, where `N >= matchers.len()` and `bitmask_len` is the per-matcher
+    ///   bitmask length.
+    /// * `indices` - Optional mapping from matcher index to bitmask row. If `None`, the
+    ///   bitmask row `i` is written for `matchers[i]`.
+    /// * `debug_print` - When `true`, print debug information.
+    pub fn batch_fill_next_token_bitmask(
+        &mut self,
+        matchers: &mut [GrammarMatcher],
+        next_token_bitmask: &mut DLTensor,
+        indices: Option<&[i32]>,
+        debug_print: Option<bool>,
+    ) -> Result<()> {
+        let dl_tensor = next_token_bitmask.dl_tensor();
+        let debug_print = debug_print.unwrap_or(false);
+        let matchers_ptr = matchers.as_mut_ptr();
+        let num_matchers = matchers.len();
+        let indices_ptr = indices.map(|s| s.as_ptr()).unwrap_or(std::ptr::null());
+        let num_indices = indices.map(|s| s.len()).unwrap_or(0);
+        let has_indices = indices.is_some();
+
+        let result = cpp!(unsafe [
+            self as "xgrammar::BatchGrammarMatcher*",
+            matchers_ptr as "xgrammar::GrammarMatcher*",
+            num_matchers as "size_t",
+            dl_tensor as "DLTensor*",
+            indices_ptr as "const int32_t*",
+            num_indices as "size_t",
+            has_indices as "bool",
+            debug_print as "bool"
+        ] -> MatcherResult as "MatcherResult" {
+            try {
+                std::vector<xgrammar::GrammarMatcher> matchers_vec;
+                matchers_vec.reserve(num_matchers);
+                for (size_t i = 0; i < num_matchers; ++i) {
+                    matchers_vec.push_back(matchers_ptr[i]);
+                }
+                std::optional<std::vector<int32_t>> opt_indices;
+                if (has_indices) {
+                    opt_indices = std::vector<int32_t>(
+                        indices_ptr, indices_ptr + num_indices
+                    );
+                }
+                self->BatchFillNextTokenBitmask(
+                    &matchers_vec, dl_tensor, opt_indices, debug_print
+                );
+                for (size_t i = 0; i < num_matchers; ++i) {
+                    matchers_ptr[i] = std::move(matchers_vec[i]);
+                }
+                return {true, false, nullptr};
+            } catch (const std::exception& e) {
+                return {false, false, strdup(e.what())};
+            }
+        });
+
+        result.into()
+    }
+
+    /// Batched version of [`GrammarMatcher::accept_token`]. Returns a vector of booleans
+    /// indicating whether each token was accepted by the corresponding matcher.
+    pub fn batch_accept_token(
+        matchers: &mut [GrammarMatcher],
+        token_ids: &[i32],
+        debug_print: Option<bool>,
+    ) -> Vec<bool> {
+        let debug_print = debug_print.unwrap_or(false);
+        let matchers_ptr = matchers.as_mut_ptr();
+        let num_matchers = matchers.len();
+        let token_ids_ptr = token_ids.as_ptr();
+        let num_tokens = token_ids.len();
+        let mut out_buf = vec![0u8; num_matchers];
+        let out_ptr = out_buf.as_mut_ptr();
+
+        cpp!(unsafe [
+            matchers_ptr as "xgrammar::GrammarMatcher*",
+            num_matchers as "size_t",
+            token_ids_ptr as "const int32_t*",
+            num_tokens as "size_t",
+            out_ptr as "uint8_t*",
+            debug_print as "bool"
+        ] {
+            std::vector<xgrammar::GrammarMatcher> matchers_vec;
+            matchers_vec.reserve(num_matchers);
+            for (size_t i = 0; i < num_matchers; ++i) {
+                matchers_vec.push_back(matchers_ptr[i]);
+            }
+            std::vector<int32_t> token_ids_vec(token_ids_ptr, token_ids_ptr + num_tokens);
+            auto out = xgrammar::BatchGrammarMatcher::BatchAcceptToken(
+                &matchers_vec, token_ids_vec, debug_print
+            );
+            for (size_t i = 0; i < num_matchers; ++i) {
+                matchers_ptr[i] = std::move(matchers_vec[i]);
+            }
+            size_t n = out.size() < num_matchers ? out.size() : num_matchers;
+            for (size_t i = 0; i < n; ++i) {
+                out_ptr[i] = out[i];
+            }
+        });
+
+        out_buf.into_iter().map(|b| b != 0).collect()
+    }
+
+    /// Batched version of [`GrammarMatcher::accept_string`]. Returns a vector of booleans
+    /// indicating whether each string was accepted by the corresponding matcher.
+    pub fn batch_accept_string(
+        matchers: &mut [GrammarMatcher],
+        input_strs: &[&str],
+        debug_print: Option<bool>,
+    ) -> Vec<bool> {
+        let debug_print = debug_print.unwrap_or(false);
+        let matchers_ptr = matchers.as_mut_ptr();
+        let num_matchers = matchers.len();
+
+        let cstrings: Vec<CString> = input_strs
+            .iter()
+            .map(|s| CString::new(*s).expect("Failed to convert input_str to CString"))
+            .collect();
+        let c_ptrs: Vec<*const std::os::raw::c_char> =
+            cstrings.iter().map(|c| c.as_ptr()).collect();
+        let c_ptrs_ptr = c_ptrs.as_ptr();
+        let num_strs = c_ptrs.len();
+        let mut out_buf = vec![0u8; num_matchers];
+        let out_ptr = out_buf.as_mut_ptr();
+
+        cpp!(unsafe [
+            matchers_ptr as "xgrammar::GrammarMatcher*",
+            num_matchers as "size_t",
+            c_ptrs_ptr as "const char* const*",
+            num_strs as "size_t",
+            out_ptr as "uint8_t*",
+            debug_print as "bool"
+        ] {
+            std::vector<xgrammar::GrammarMatcher> matchers_vec;
+            matchers_vec.reserve(num_matchers);
+            for (size_t i = 0; i < num_matchers; ++i) {
+                matchers_vec.push_back(matchers_ptr[i]);
+            }
+            std::vector<std::string> input_strs_vec;
+            input_strs_vec.reserve(num_strs);
+            for (size_t i = 0; i < num_strs; ++i) {
+                input_strs_vec.emplace_back(c_ptrs_ptr[i]);
+            }
+            auto out = xgrammar::BatchGrammarMatcher::BatchAcceptString(
+                &matchers_vec, input_strs_vec, debug_print
+            );
+            for (size_t i = 0; i < num_matchers; ++i) {
+                matchers_ptr[i] = std::move(matchers_vec[i]);
+            }
+            size_t n = out.size() < num_matchers ? out.size() : num_matchers;
+            for (size_t i = 0; i < n; ++i) {
+                out_ptr[i] = out[i];
+            }
+        });
+
+        // Keep cstrings alive through the call.
+        drop(cstrings);
+        out_buf.into_iter().map(|b| b != 0).collect()
+    }
+
+    /// Batched version of [`GrammarMatcher::rollback`]. Each matcher rolls back by the
+    /// corresponding count in `num_tokens`.
+    pub fn batch_rollback(matchers: &mut [GrammarMatcher], num_tokens: &[i32]) {
+        let matchers_ptr = matchers.as_mut_ptr();
+        let num_matchers = matchers.len();
+        let num_tokens_ptr = num_tokens.as_ptr();
+        let num_tokens_len = num_tokens.len();
+
+        cpp!(unsafe [
+            matchers_ptr as "xgrammar::GrammarMatcher*",
+            num_matchers as "size_t",
+            num_tokens_ptr as "const int*",
+            num_tokens_len as "size_t"
+        ] {
+            std::vector<xgrammar::GrammarMatcher> matchers_vec;
+            matchers_vec.reserve(num_matchers);
+            for (size_t i = 0; i < num_matchers; ++i) {
+                matchers_vec.push_back(matchers_ptr[i]);
+            }
+            std::vector<int> num_tokens_vec(num_tokens_ptr, num_tokens_ptr + num_tokens_len);
+            xgrammar::BatchGrammarMatcher::BatchRollback(&matchers_vec, num_tokens_vec);
+            for (size_t i = 0; i < num_matchers; ++i) {
+                matchers_ptr[i] = std::move(matchers_vec[i]);
+            }
+        });
     }
 }

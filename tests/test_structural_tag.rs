@@ -16,7 +16,7 @@ fn test_const_string_format() {
         }
     });
 
-    let grammar = Grammar::from_structural_tag(&structural_tag.to_string());
+    let grammar = Grammar::from_structural_tag(&structural_tag.to_string(), None);
     assert!(grammar.is_ok());
     assert!(!grammar.unwrap().is_null());
 }
@@ -39,7 +39,7 @@ fn test_json_schema_format() {
         }
     });
 
-    let grammar = Grammar::from_structural_tag(&structural_tag.to_string());
+    let grammar = Grammar::from_structural_tag(&structural_tag.to_string(), None);
     assert!(grammar.is_ok());
     assert!(!grammar.unwrap().is_null());
 }
@@ -55,7 +55,7 @@ fn test_regex_format() {
         }
     });
 
-    let grammar = Grammar::from_structural_tag(&structural_tag.to_string());
+    let grammar = Grammar::from_structural_tag(&structural_tag.to_string(), None);
     assert!(grammar.is_ok());
     assert!(!grammar.unwrap().is_null());
 }
@@ -71,7 +71,7 @@ fn test_grammar_format() {
         }
     });
 
-    let grammar = Grammar::from_structural_tag(&structural_tag.to_string());
+    let grammar = Grammar::from_structural_tag(&structural_tag.to_string(), None);
     assert!(grammar.is_ok());
     assert!(!grammar.unwrap().is_null());
 }
@@ -89,7 +89,7 @@ fn test_any_text_format() {
         }
     });
 
-    let grammar = Grammar::from_structural_tag(&structural_tag.to_string());
+    let grammar = Grammar::from_structural_tag(&structural_tag.to_string(), None);
     assert!(grammar.is_ok());
     assert!(!grammar.unwrap().is_null());
 }
@@ -113,7 +113,7 @@ fn test_sequence_format() {
         }
     });
 
-    let grammar = Grammar::from_structural_tag(&structural_tag.to_string());
+    let grammar = Grammar::from_structural_tag(&structural_tag.to_string(), None);
     assert!(grammar.is_ok());
     assert!(!grammar.unwrap().is_null());
 }
@@ -132,7 +132,7 @@ fn test_or_format() {
         }
     });
 
-    let grammar = Grammar::from_structural_tag(&structural_tag.to_string());
+    let grammar = Grammar::from_structural_tag(&structural_tag.to_string(), None);
     assert!(grammar.is_ok());
     assert!(!grammar.unwrap().is_null());
 }
@@ -150,7 +150,7 @@ fn test_tag_format() {
         }
     });
 
-    let grammar = Grammar::from_structural_tag(&structural_tag.to_string());
+    let grammar = Grammar::from_structural_tag(&structural_tag.to_string(), None);
     assert!(grammar.is_ok());
     assert!(!grammar.unwrap().is_null());
 }
@@ -198,7 +198,7 @@ fn test_triggered_tags_format() {
         }
     });
 
-    let grammar = Grammar::from_structural_tag(&structural_tag.to_string());
+    let grammar = Grammar::from_structural_tag(&structural_tag.to_string(), None);
     assert!(grammar.is_ok());
     assert!(!grammar.unwrap().is_null());
 }
@@ -222,7 +222,7 @@ fn test_triggered_tags_at_least_one() {
         }
     });
 
-    let grammar = Grammar::from_structural_tag(&structural_tag.to_string());
+    let grammar = Grammar::from_structural_tag(&structural_tag.to_string(), None);
     assert!(grammar.is_ok());
     assert!(!grammar.unwrap().is_null());
 }
@@ -246,7 +246,7 @@ fn test_triggered_tags_stop_after_first() {
         }
     });
 
-    let grammar = Grammar::from_structural_tag(&structural_tag.to_string());
+    let grammar = Grammar::from_structural_tag(&structural_tag.to_string(), None);
     assert!(grammar.is_ok());
     assert!(!grammar.unwrap().is_null());
 }
@@ -269,7 +269,7 @@ fn test_tags_with_separator_format() {
         }
     });
 
-    let grammar = Grammar::from_structural_tag(&structural_tag.to_string());
+    let grammar = Grammar::from_structural_tag(&structural_tag.to_string(), None);
     assert!(grammar.is_ok());
     assert!(!grammar.unwrap().is_null());
 }
@@ -293,7 +293,7 @@ fn test_tags_with_separator_at_least_one() {
         }
     });
 
-    let grammar = Grammar::from_structural_tag(&structural_tag.to_string());
+    let grammar = Grammar::from_structural_tag(&structural_tag.to_string(), None);
     assert!(grammar.is_ok());
     assert!(!grammar.unwrap().is_null());
 }
@@ -316,7 +316,7 @@ fn test_qwen_xml_parameter_format() {
         }
     });
 
-    let grammar = Grammar::from_structural_tag(&structural_tag.to_string());
+    let grammar = Grammar::from_structural_tag(&structural_tag.to_string(), None);
     assert!(grammar.is_ok());
     assert!(!grammar.unwrap().is_null());
 }
@@ -345,7 +345,7 @@ fn test_nested_sequence_with_or() {
         }
     });
 
-    let grammar = Grammar::from_structural_tag(&structural_tag.to_string());
+    let grammar = Grammar::from_structural_tag(&structural_tag.to_string(), None);
     assert!(grammar.is_ok());
     assert!(!grammar.unwrap().is_null());
 }
@@ -387,7 +387,7 @@ fn test_tool_calling_with_think_tag() {
         }
     });
 
-    let grammar = Grammar::from_structural_tag(&structural_tag.to_string());
+    let grammar = Grammar::from_structural_tag(&structural_tag.to_string(), None);
     assert!(grammar.is_ok());
     assert!(!grammar.unwrap().is_null());
 }
