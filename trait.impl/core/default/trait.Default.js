@@ -1,9 +1,9 @@
 (function() {
-    var implementors = Object.fromEntries([["xgrammar",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/default/trait.Default.html\" title=\"trait core::default::Default\">Default</a> for <a class=\"struct\" href=\"xgrammar/huggingface_hub/struct.Params.html\" title=\"struct xgrammar::huggingface_hub::Params\">Params</a>"]]]]);
+    var implementors = Object.fromEntries([["xgrammar",[["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/default/trait.Default.html\" title=\"trait core::default::Default\">Default</a> for <a class=\"struct\" href=\"xgrammar/huggingface_hub/struct.Params.html\" title=\"struct xgrammar::huggingface_hub::Params\">Params</a>"],["impl <a class=\"trait\" href=\"https://doc.rust-lang.org/nightly/core/default/trait.Default.html\" title=\"trait core::default::Default\">Default</a> for <a class=\"struct\" href=\"xgrammar/struct.BatchGrammarMatcher.html\" title=\"struct xgrammar::BatchGrammarMatcher\">BatchGrammarMatcher</a>"]]]]);
     if (window.register_implementors) {
         window.register_implementors(implementors);
     } else {
         window.pending_implementors = implementors;
     }
 })()
-//{"start":57,"fragment_lengths":[307]}
+//{"start":57,"fragment_lengths":[606]}
