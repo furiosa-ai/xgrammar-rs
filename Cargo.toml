@@ -5,6 +5,7 @@ authors = ["Hyunsik Choi <hyunsik@furiosa.ai>"]
 description = "Rust bindings for XGrammar"
 edition = "2024"
 license = "Apache-2.0"
+repository = "https://github.com/furiosa-ai/xgrammar-rs"
 
 exclude = [".github/*"]
 
