@@ -22,10 +22,12 @@ fn main() {
     // Note: -fno-lto is needed on AArch64, due to default linker differences on Rust among
     // x86_64 and others.
     // See https://blog.rust-lang.org/2025/09/01/rust-lld-on-1.90.0-stable/ for details.
-    #[cfg(target_arch = "x86_64")]
-    let cxx_flags: &str = "-Wno-deprecated-declarations";
-    #[cfg(not(target_arch = "x86_64"))]
-    let cxx_flags: &str = "-Wno-deprecated-declarations -fno-lto";
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").expect("CARGO_CFG_TARGET_ARCH is not set");
+    let cxx_flags = if target_arch == "x86_64" {
+        "-Wno-deprecated-declarations"
+    } else {
+        "-Wno-deprecated-declarations -fno-lto"
+    };
 
     let xgrammar = cmake::Config::new("thirdparty/xgrammar")
         .define("CMAKE_CXX_COMPILER", "clang++")
