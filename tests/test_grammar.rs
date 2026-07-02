@@ -98,7 +98,7 @@ fn test_grammar_from_ebnf_error() {
 fn test_grammar_from_json_schema_error() {
     let invalid_json = "{ invalid json }";
     let Err(XGrammarErr::InvalidGrammar(err_msg)) =
-        Grammar::from_json_schema(invalid_json, None, None, None, None, None, None)
+        Grammar::from_json_schema(invalid_json, None, None, None, None, None, None, None)
     else {
         panic!("Expected grammar creation to fail, but it succeeded");
     };

@@ -1016,6 +1016,7 @@ impl Grammar {
         strict_mode: Option<bool>,
         max_whitespace_cnt: Option<i32>,
         print_converted_ebnf: Option<bool>,
+        any_order: Option<bool>,
     ) -> Result<Self> {
         let schema_cstring = CString::new(schema).expect("Failed to convert schema to CString");
         let schema_ptr = schema_cstring.as_ptr();
@@ -1027,6 +1028,7 @@ impl Grammar {
         let has_separators = separators.is_some();
         let has_max_whitespace_cnt = max_whitespace_cnt.is_some();
         let max_whitespace_cnt_value = max_whitespace_cnt.unwrap_or(0);
+        let any_order = any_order.unwrap_or(false);
 
         let (_obj_sep_cstring, _array_sep_cstring, obj_sep_ptr, array_sep_ptr) =
             if let Some((obj_sep, array_sep)) = separators {
@@ -1052,7 +1054,8 @@ impl Grammar {
             strict_mode as "bool",
             has_max_whitespace_cnt as "bool",
             max_whitespace_cnt_value as "int",
-            print_converted_ebnf as "bool"
+            print_converted_ebnf as "bool",
+            any_order as "bool"
         ] -> GrammarResult as "GrammarResult" {
             try {
                 std::string schema_str(schema_ptr);
@@ -1074,7 +1077,8 @@ impl Grammar {
                     opt_separators,
                     strict_mode,
                     opt_max_whitespace_cnt,
-                    print_converted_ebnf
+                    print_converted_ebnf,
+                    any_order
                 );
                 return {true, grammar, nullptr};
             } catch (const std::exception& e) {

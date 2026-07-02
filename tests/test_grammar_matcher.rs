@@ -434,7 +434,7 @@ fn test_grammar_from_json_schema_with_pattern_properties() {
     })
     .to_string();
     let grammar =
-        Grammar::from_json_schema(&json_schema, None, None, None, None, None, None).unwrap();
+        Grammar::from_json_schema(&json_schema, None, None, None, None, None, None, None).unwrap();
     let tokenizer_info =
         TokenizerInfo::from_pretrained(GPT_OSS_20B_PRETRAINED_ID, None, None, None)
             .expect("Failed to load tokenizer info");
@@ -467,5 +467,77 @@ fn test_grammar_from_json_schema_with_pattern_properties() {
     ] {
         matcher.reset();
         assert!(!matcher.accept_string(sample_json, None), "should not accept {}", sample_json);
+    }
+}
+
+/// Test GrammarMatcher with JSON schema using `any_order` parameter, introduced in v0.2.3.
+#[test]
+fn test_grammar_from_json_schema_with_any_order() {
+    let json_schema = serde_json::json!({
+        "$schema": "http://json-schema.org/draft-04/schema#",
+        "patternProperties": {
+            "pattern_a_[0-9]+": { "type": "string" },
+            "pattern_b_[0-9]+": { "type": "string" },
+        },
+        "properties": {
+            "must_1": { "type": "string" },
+            "must_2": { "type": "string" },
+            "optional_1": { "type": "string" },
+            "optional_2": { "type": "string" },
+        },
+        "additionalProperties": false,
+        "required": ["must_1", "must_2"],
+        "type": "object"
+    });
+
+    for any_order in [false, true] {
+        let grammar = Grammar::from_json_schema(
+            &json_schema.to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(any_order),
+        )
+        .unwrap();
+        let tokenizer_info =
+            TokenizerInfo::from_pretrained(GPT_OSS_20B_PRETRAINED_ID, None, None, None)
+                .expect("Failed to load tokenizer info");
+        let compiler = GrammarCompiler::new(&tokenizer_info);
+
+        let compiled_grammar =
+            compiler.compile_grammar(&grammar).expect("should be a valid grammar");
+        let mut matcher = GrammarMatcher::with(&compiled_grammar, None, Some(true), None);
+
+        for sample_json in [
+            r#"{"must_1": "", "must_2": ""}"#,
+            r#"{"must_1": "", "must_2": "", "optional_1": ""}"#,
+            r#"{"must_1": "", "must_2": "", "optional_2": ""}"#,
+            r#"{"must_1": "", "must_2": "", "optional_1": "", "optional_2": ""}"#,
+            r#"{"must_1": "", "must_2": "", "optional_1": "", "optional_2": "", "pattern_a_123": ""}"#,
+        ] {
+            matcher.reset();
+            assert!(matcher.accept_string(sample_json, None), "should accept {}", sample_json);
+            assert!(matcher.is_terminated());
+        }
+
+        for sample_json in [
+            r#"{"must_2": "", "must_1": ""}"#,
+            r#"{"must_1": "", "optional_1": "", "must_2": ""}"#,
+            r#"{"optional_1": "", "optional_2": "", "must_1": "", "must_2": ""}"#,
+            r#"{"must_1": "", "must_2": "", "optional_2": "", "optional_1": ""}"#,
+            r#"{"must_1": "", "must_2": "", "pattern_a_123": "", "optional_1": ""}"#,
+            r#"{"pattern_a_123": "", "must_1": "", "optional_1": "", "must_2": "", "optional_2": ""}"#,
+        ] {
+            matcher.reset();
+            assert_eq!(
+                matcher.accept_string(sample_json, None),
+                any_order,
+                "this JSON should match when any_order is true: {}",
+                sample_json
+            );
+        }
     }
 }
