@@ -1,3 +1,2 @@
-var srcIndex = new Map(JSON.parse('[["xgrammar",["",[],["error.rs","huggingface_hub.rs","lib.rs"]]]]'));
-createSrcSidebar();
-//{"start":36,"fragment_lengths":[63]}
+createSrcSidebar('[["xgrammar",["",[],["error.rs","huggingface_hub.rs","lib.rs"]]]]');
+//{"start":19,"fragment_lengths":[63]}
