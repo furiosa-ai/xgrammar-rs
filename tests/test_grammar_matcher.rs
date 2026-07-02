@@ -434,8 +434,7 @@ fn test_grammar_from_json_schema_with_pattern_properties() {
     })
     .to_string();
     let grammar =
-        Grammar::from_json_schema(&json_schema, None, None, None, None, None, None)
-            .unwrap();
+        Grammar::from_json_schema(&json_schema, None, None, None, None, None, None).unwrap();
     let tokenizer_info =
         TokenizerInfo::from_pretrained(GPT_OSS_20B_PRETRAINED_ID, None, None, None)
             .expect("Failed to load tokenizer info");
@@ -458,6 +457,7 @@ fn test_grammar_from_json_schema_with_pattern_properties() {
     ] {
         matcher.reset();
         assert!(matcher.accept_string(sample_json, None), "should accept {}", sample_json);
+        assert!(matcher.is_terminated());
     }
 
     for sample_json in [
