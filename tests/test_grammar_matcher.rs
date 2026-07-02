@@ -415,3 +415,57 @@ fn test_vector_returning_getters_do_not_crash() {
         assert!(*id >= 0 && *id < vocab_size, "stop id {id} out of vocab range");
     }
 }
+
+/// Test GrammarMatcher with JSON schema that has both properties and patternProperties.
+//
+// cf. https://github.com/mlc-ai/xgrammar/pull/594 , which was resolved in xgrammar v0.2.1.
+#[test]
+fn test_grammar_from_json_schema_with_pattern_properties() {
+    let json_schema = serde_json::json!({
+      "$schema": "http://json-schema.org/draft-04/schema#",
+      "patternProperties": {
+        "^(cat|dog)_name$": { "type": "string" },
+        "^(extra_field_[0-9]+)$": { "type": ["string", "integer", "null"] }
+      },
+      "properties": { "name": { "type": "string" } },
+      "additionalProperties": false,
+      "required": ["name"],
+      "type": "object"
+    })
+    .to_string();
+    let grammar =
+        Grammar::from_json_schema(&json_schema, None, None, None, None, None, None)
+            .unwrap();
+    let tokenizer_info =
+        TokenizerInfo::from_pretrained(GPT_OSS_20B_PRETRAINED_ID, None, None, None)
+            .expect("Failed to load tokenizer info");
+    let compiler = GrammarCompiler::new(&tokenizer_info);
+
+    let compiled_grammar = compiler.compile_grammar(&grammar).expect("should be a valid grammar");
+    let mut matcher = GrammarMatcher::with(&compiled_grammar, None, Some(true), None);
+
+    // NOTE: we use raw strings here instead of `serde_json::Value::to_string()`,
+    // because the default compilation parameters require ordering between properties (required ones come first).
+    for sample_json in [
+        r#"{"name": ""}"#,
+        r#"{"name": "john"}"#,
+        r#"{"name": "john", "cat_name": "mocha"}"#,
+        r#"{"name": "john", "dog_name": "joy"}"#,
+        r#"{"name": "john", "extra_field_123": 123}"#,
+        r#"{"name": "john", "extra_field_1": "test"}"#,
+        r#"{"name": "john", "extra_field_1": "one", "extra_field_2": 2, "extra_field_3": null}"#,
+        r#"{"name": "john", "cat_name": "mocha", "dog_name": "joy", "extra_field_1": "hello"}"#,
+    ] {
+        matcher.reset();
+        assert!(matcher.accept_string(sample_json, None), "should accept {}", sample_json);
+    }
+
+    for sample_json in [
+        r#"{"name": "evil", "cat_name": 3}"#,
+        r#"{"name": "evil", "unexpected_field": "alien"}"#,
+        r#"{"name": "evil", "extra_field_": "no number"}"#,
+    ] {
+        matcher.reset();
+        assert!(!matcher.accept_string(sample_json, None), "should not accept {}", sample_json);
+    }
+}
