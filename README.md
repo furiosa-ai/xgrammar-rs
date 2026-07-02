@@ -1,6 +1,6 @@
 # xgrammar-rs
 
-This project uses [xgrammar](https://github.com/mlc-ai/xgrammar) **v0.1.33** as a submodule.
+This project uses [xgrammar](https://github.com/mlc-ai/xgrammar) **v0.2.3** as a submodule.
 
 [![CI](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/ci.yml) [![Deploy Docs](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/docs.yml/badge.svg)](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/docs.yml)
 
