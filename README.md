@@ -42,7 +42,15 @@ The C++ `xgrammar` library is included as a submodule and will be compiled autom
 To build the project, run the following command:
 
 ```bash
+git clone --recurse-submodules https://github.com/furiosa-ai/xgrammar-rs.git
+cd xgrammar-rs
 cargo build --release
+```
+
+If you have already cloned the repository without `--recurse-submodules`, initialize the submodule with:
+
+```bash
+git submodule update --init --recursive
 ```
 
 This will create a release build in the `target/release` directory.

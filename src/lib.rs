@@ -274,14 +274,14 @@ impl TokenizerInfo {
             .max()
             .ok_or(XGrammarErr::InvalidTokenizerConfig("Vocab map is empty".to_string()))?;
         let tokenizer_vocab_size = std::cmp::max(vocab_map.len(), (max_id + 1) as usize);
-        if let Some(vocab_size) = vocab_size {
-            if vocab_size != tokenizer_vocab_size {
-                tracing::warn!(
-                    "Provided vocab_size {} does not match tokenizer vocab size {}. Using provided vocab_size.",
-                    vocab_size,
-                    tokenizer_vocab_size
-                );
-            }
+        if let Some(vocab_size) = vocab_size
+            && vocab_size != tokenizer_vocab_size
+        {
+            tracing::warn!(
+                "Provided vocab_size {} does not match tokenizer vocab size {}. Using provided vocab_size.",
+                vocab_size,
+                tokenizer_vocab_size
+            );
         }
         let final_vocab_size = vocab_size.unwrap_or(tokenizer_vocab_size);
         let tokenizer_metadata = Self::detect_metadata_from_hf(backend_str);
