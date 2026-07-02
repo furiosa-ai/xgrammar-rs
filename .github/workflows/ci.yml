@@ -19,7 +19,9 @@ jobs:
           submodules: 'recursive'
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.96.1
 
       - name: Install dependencies
         run: |
