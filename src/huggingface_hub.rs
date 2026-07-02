@@ -33,16 +33,16 @@ pub struct Params {
 impl Params {
     pub fn is_matched(&self, filename: &str) -> bool {
         // Referred from https://github.com/huggingface/huggingface_hub/blob/a09927331ec0ed2df90968da2200c6bef8ab4117/src/huggingface_hub/utils/_paths.py#L124
-        if let Some(patterns) = &self.allow_patterns {
-            if !patterns.iter().any(|glob| glob.is_match(filename)) {
-                return false;
-            }
+        if let Some(patterns) = &self.allow_patterns
+            && !patterns.iter().any(|glob| glob.is_match(filename))
+        {
+            return false;
         }
 
-        if let Some(patterns) = &self.ignore_patterns {
-            if patterns.iter().any(|glob| glob.is_match(filename)) {
-                return false;
-            }
+        if let Some(patterns) = &self.ignore_patterns
+            && patterns.iter().any(|glob| glob.is_match(filename))
+        {
+            return false;
         }
 
         true
@@ -59,10 +59,10 @@ pub fn snapshot_download(repo: Repo, options: Option<Params>) -> Result<PathBuf,
     let repo_info: RepoInfo = api_repo.info()?;
 
     for sibling in repo_info.siblings {
-        if let Some(options) = &options {
-            if !options.is_matched(&sibling.rfilename) {
-                continue;
-            }
+        if let Some(options) = &options
+            && !options.is_matched(&sibling.rfilename)
+        {
+            continue;
         }
         api_repo.get(&sibling.rfilename)?;
     }
