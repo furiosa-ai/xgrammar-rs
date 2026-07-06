@@ -469,3 +469,290 @@ fn test_grammar_from_json_schema_with_pattern_properties() {
         assert!(!matcher.accept_string(sample_json, None), "should not accept {}", sample_json);
     }
 }
+
+// ---------------------------------------------------------------------------
+// traverse_draft_tree (speculative decoding)
+// ---------------------------------------------------------------------------
+
+type Tensor = dlpark::versioned::SafeManagedTensorVersioned;
+
+/// Encode `s` and assert it maps to exactly one token, returning the id as
+/// `i64` for draft-tree tensors. The traverse tests depend on these strings
+/// being single tokens; this fails loudly if a tokenizer revision changes that.
+fn single_token_id(tokenizer: &xgrammar::tokenizers::Tokenizer, s: &str) -> i64 {
+    let encoding = tokenizer.encode(s, false).expect("failed to encode");
+    let ids = encoding.get_ids();
+    assert_eq!(ids.len(), 1, "expected {s:?} to encode to exactly one token, got {ids:?}");
+    ids[0] as i64
+}
+
+fn i64_tensor(values: Vec<i64>) -> Tensor {
+    Tensor::new(values).expect("failed to create i64 tensor")
+}
+
+/// Allocate a `(rows, len)` int32 bitmask tensor pre-filled with `fill`.
+/// Traverse tests pre-fill with -1 so a row zeroed by the traversal is
+/// distinguishable from a row it never touched.
+fn new_bitmask_filled(rows: usize, len: usize, fill: i32) -> Tensor {
+    let arr = ArrayD::from_elem(IxDyn(&[rows, len]), fill);
+    Tensor::new(arr).expect("failed to create bitmask tensor")
+}
+
+fn bitmask_rows(tensor: &Tensor, len: usize) -> Vec<Vec<i32>> {
+    use dlpark::prelude::*;
+    let slice: &[i32] = tensor.as_slice_contiguous().expect("failed to get bitmask slice");
+    slice.chunks(len).map(|chunk| chunk.to_vec()).collect()
+}
+
+/// Returns the tokenizer (for deriving draft token ids), the compiled builtin
+/// JSON grammar, and the per-row bitmask length for its vocabulary.
+fn setup_traverse_fixture() -> (xgrammar::tokenizers::Tokenizer, xgrammar::CompiledGrammar, usize) {
+    let tokenizer =
+        common::load_tokenizer(GPT_OSS_20B_PRETRAINED_ID).expect("Failed to load tokenizer");
+    let tokenizer_info =
+        TokenizerInfo::from_pretrained(GPT_OSS_20B_PRETRAINED_ID, None, None, None)
+            .expect("Failed to load tokenizer info");
+    let bitmask_len = xgrammar::get_bitmask_size(tokenizer_info.get_vocab_size()) as usize;
+    let compiler = GrammarCompiler::new(&tokenizer_info);
+    let compiled =
+        compiler.compile_builtin_json_grammar().expect("Failed to compile builtin JSON grammar");
+    (tokenizer, compiled, bitmask_len)
+}
+
+#[test]
+fn test_get_bitmask_size() {
+    use xgrammar::get_bitmask_size;
+
+    assert_eq!(get_bitmask_size(1), 1);
+    assert_eq!(get_bitmask_size(32), 1);
+    assert_eq!(get_bitmask_size(33), 2);
+    // A realistic vocabulary size (gpt-oss-20b).
+    assert_eq!(get_bitmask_size(201_088), 201_088usize.div_ceil(32) as i32);
+}
+
+#[test]
+fn test_traverse_draft_tree_linear() {
+    use dlpark::prelude::*;
+
+    let (tokenizer, compiled, bitmask_len) = setup_traverse_fixture();
+    let mut matcher = GrammarMatcher::new(&compiled);
+
+    let brace = single_token_id(&tokenizer, "{");
+    let quote = single_token_id(&tokenizer, "\"");
+
+    // Linear tree 0 -> 1 -> 2; draft_tokens[0] is ignored by the traversal.
+    let next_token = i64_tensor(vec![1, 2, -1]);
+    let next_sibling = i64_tensor(vec![-1, -1, -1]);
+    let draft_tokens = i64_tensor(vec![0, brace, quote]);
+    let mut bitmask = new_bitmask_filled(3, bitmask_len, -1);
+
+    let completed = matcher
+        .traverse_draft_tree(&next_token, &next_sibling, &draft_tokens, &mut bitmask, None)
+        .expect("traverse_draft_tree should succeed");
+    assert!(completed);
+
+    let rows = bitmask_rows(&bitmask, bitmask_len);
+    for (i, row) in rows.iter().enumerate() {
+        assert!(row.iter().any(|&w| w != -1), "row {i} was never written");
+        assert!(row.iter().any(|&w| w != 0), "row {i} should have allowed tokens");
+    }
+
+    // Row 0 must equal fill_next_token_bitmask of a fresh matcher: both
+    // reflect the same (initial) matcher state.
+    let mut fresh = GrammarMatcher::new(&compiled);
+    let mut root_only = new_bitmask_filled(1, bitmask_len, 0);
+    fresh.fill_next_token_bitmask(&mut root_only, None, None).expect("fill should succeed");
+    let root_row: &[i32] = root_only.as_slice_contiguous().expect("failed to get slice");
+    assert_eq!(rows[0], root_row);
+
+    // A completed traversal leaves the matcher state untouched.
+    assert!(matcher.accept_string("{\"a\":1}", None));
+    assert!(matcher.is_terminated());
+}
+
+#[test]
+fn test_traverse_draft_tree_with_siblings() {
+    let (tokenizer, compiled, bitmask_len) = setup_traverse_fixture();
+    let mut matcher = GrammarMatcher::new(&compiled);
+
+    let brace = single_token_id(&tokenizer, "{");
+    let bracket = single_token_id(&tokenizer, "[");
+
+    // Root with two children: nodes 1 and 2 are siblings, both grammar-valid
+    // continuations. Exercises the internal rollback between siblings.
+    let next_token = i64_tensor(vec![1, -1, -1]);
+    let next_sibling = i64_tensor(vec![-1, 2, -1]);
+    let draft_tokens = i64_tensor(vec![0, brace, bracket]);
+    let mut bitmask = new_bitmask_filled(3, bitmask_len, -1);
+
+    let completed = matcher
+        .traverse_draft_tree(&next_token, &next_sibling, &draft_tokens, &mut bitmask, None)
+        .expect("traverse_draft_tree should succeed");
+    assert!(completed);
+
+    let rows = bitmask_rows(&bitmask, bitmask_len);
+    for (i, row) in rows.iter().enumerate() {
+        assert!(row.iter().any(|&w| w != -1), "row {i} was never written");
+        assert!(row.iter().any(|&w| w != 0), "row {i} should have allowed tokens");
+    }
+}
+
+#[test]
+fn test_traverse_draft_tree_rejected_node() {
+    let (tokenizer, compiled, bitmask_len) = setup_traverse_fixture();
+    let mut matcher = GrammarMatcher::new(&compiled);
+
+    let brace = single_token_id(&tokenizer, "{");
+    let colon = single_token_id(&tokenizer, ":");
+
+    // ":" is not a valid JSON continuation right after "{": node 2 is
+    // rejected, its row is zeroed, and the traversal still completes.
+    let next_token = i64_tensor(vec![1, 2, -1]);
+    let next_sibling = i64_tensor(vec![-1, -1, -1]);
+    let draft_tokens = i64_tensor(vec![0, brace, colon]);
+    let mut bitmask = new_bitmask_filled(3, bitmask_len, -1);
+
+    let completed = matcher
+        .traverse_draft_tree(&next_token, &next_sibling, &draft_tokens, &mut bitmask, None)
+        .expect("traverse_draft_tree should succeed");
+    assert!(completed, "a rejected draft token must not fail the traversal");
+
+    let rows = bitmask_rows(&bitmask, bitmask_len);
+    assert!(rows[1].iter().any(|&w| w != 0), "row 1 should have allowed tokens");
+    assert!(rows[2].iter().all(|&w| w == 0), "rejected node's row must be zeroed");
+}
+
+#[test]
+fn test_traverse_draft_tree_skipped_subtree() {
+    let (tokenizer, compiled, bitmask_len) = setup_traverse_fixture();
+    let mut matcher = GrammarMatcher::new(&compiled);
+
+    let brace = single_token_id(&tokenizer, "{");
+
+    // Node 1 carries an out-of-range token id: its row is zeroed and its
+    // subtree (node 2) is skipped without its row being touched.
+    let next_token = i64_tensor(vec![1, 2, -1]);
+    let next_sibling = i64_tensor(vec![-1, -1, -1]);
+    let draft_tokens = i64_tensor(vec![0, 10_000_000, brace]);
+    let mut bitmask = new_bitmask_filled(3, bitmask_len, -1);
+
+    let completed = matcher
+        .traverse_draft_tree(&next_token, &next_sibling, &draft_tokens, &mut bitmask, None)
+        .expect("traverse_draft_tree should succeed");
+    assert!(completed);
+
+    let rows = bitmask_rows(&bitmask, bitmask_len);
+    assert!(rows[1].iter().all(|&w| w == 0), "out-of-range node's row must be zeroed");
+    assert!(rows[2].iter().all(|&w| w == -1), "skipped subtree's row must remain untouched");
+}
+
+#[test]
+fn test_traverse_draft_tree_validation_errors() {
+    use xgrammar::XGrammarErr;
+
+    let (_tokenizer, compiled, bitmask_len) = setup_traverse_fixture();
+    let mut matcher = GrammarMatcher::new(&compiled);
+
+    fn expect_matcher_err(result: xgrammar::Result<bool>, needle: &str) {
+        let Err(XGrammarErr::MatcherError(err_msg)) = result else {
+            panic!("Expected MatcherError containing {needle:?}");
+        };
+        assert!(err_msg.contains(needle), "expected {needle:?} in error message: {err_msg}");
+    }
+
+    let next_token = i64_tensor(vec![1, 2, -1]);
+    let next_sibling = i64_tensor(vec![-1, -1, -1]);
+    let draft_tokens = i64_tensor(vec![0, 1, 2]);
+    // One bitmask serves every case: validation fails before any row is written.
+    let mut bitmask = new_bitmask_filled(3, bitmask_len, 0);
+
+    // int32 draft tokens instead of int64.
+    let draft_i32 = Tensor::new(vec![0i32, 1, 2]).unwrap();
+    expect_matcher_err(
+        matcher.traverse_draft_tree(&next_token, &next_sibling, &draft_i32, &mut bitmask, None),
+        "The draft_tokens tensor must be a 1D int64 tensor",
+    );
+
+    // Length mismatch between the tree tensors.
+    let short_sibling = i64_tensor(vec![-1, -1]);
+    expect_matcher_err(
+        matcher.traverse_draft_tree(&next_token, &short_sibling, &draft_tokens, &mut bitmask, None),
+        "must have the same length",
+    );
+
+    // 1-D bitmask instead of 2-D.
+    let mut flat_bitmask = Tensor::new(vec![0i32; 3 * bitmask_len]).unwrap();
+    expect_matcher_err(
+        matcher.traverse_draft_tree(
+            &next_token,
+            &next_sibling,
+            &draft_tokens,
+            &mut flat_bitmask,
+            None,
+        ),
+        "The token_bitmask tensor must be a 2D int32 tensor",
+    );
+
+    // Bitmask row count not matching the node count.
+    let mut short_bitmask = new_bitmask_filled(2, bitmask_len, 0);
+    expect_matcher_err(
+        matcher.traverse_draft_tree(
+            &next_token,
+            &next_sibling,
+            &draft_tokens,
+            &mut short_bitmask,
+            None,
+        ),
+        "The token_bitmask batch size must match the number of nodes",
+    );
+
+    // The root node must not have a sibling.
+    let bad_sibling = i64_tensor(vec![1, -1, -1]);
+    expect_matcher_err(
+        matcher.traverse_draft_tree(&next_token, &bad_sibling, &draft_tokens, &mut bitmask, None),
+        "The root node must not have siblings",
+    );
+}
+
+#[test]
+fn test_traverse_draft_tree_timeout() {
+    let (tokenizer, compiled, bitmask_len) = setup_traverse_fixture();
+    let mut matcher = GrammarMatcher::new(&compiled);
+
+    // Drive the matcher to a state where a number value starts: the builtin
+    // JSON grammar's root only allows "{" or "[", so a bare digit would be
+    // rejected at the root state and the chain below would be skipped without
+    // ever reaching the timeout check.
+    assert!(matcher.accept_string("{\"a\":", None));
+
+    // A long linear chain of "1" tokens: each node extends the JSON number, so
+    // every node is grammar-valid and only the timeout can stop the traversal.
+    let one = single_token_id(&tokenizer, "1");
+    const NUM_NODES: usize = 1000;
+    let mut next_token: Vec<i64> = (1..NUM_NODES as i64).collect();
+    next_token.push(-1);
+
+    let next_token = i64_tensor(next_token);
+    let next_sibling = i64_tensor(vec![-1; NUM_NODES]);
+    let draft_tokens = i64_tensor(vec![one; NUM_NODES]);
+    let mut bitmask = new_bitmask_filled(NUM_NODES, bitmask_len, -1);
+
+    let completed = matcher
+        .traverse_draft_tree(&next_token, &next_sibling, &draft_tokens, &mut bitmask, Some(1e-7))
+        .expect("traverse_draft_tree should succeed");
+    assert!(!completed, "a 1e-7s threshold must time out on a 1000-node chain");
+
+    // The root row is always filled: the timeout is only checked at non-root
+    // nodes. Read it straight off the contiguous slice — copying all 1000 rows
+    // via bitmask_rows just to inspect row 0 would be wasteful.
+    use dlpark::prelude::*;
+    let slice: &[i32] = bitmask.as_slice_contiguous().expect("failed to get bitmask slice");
+    let root_row = &slice[..bitmask_len];
+    assert!(root_row.iter().any(|&w| w != -1), "root row must be written even on timeout");
+    assert!(root_row.iter().any(|&w| w != 0), "root row should have allowed tokens");
+
+    // After a timeout the matcher state is not guaranteed to be restored;
+    // reset() returns it to a usable state (the documented recovery path).
+    matcher.reset();
+    assert!(matcher.accept_string("{\"a\":1}", None));
+}

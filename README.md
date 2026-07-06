@@ -15,12 +15,20 @@ for constraint decoding.
   for compiling grammars (BNF, JSON schema, regex, structural tags) against a
   tokenizer.
 - `GrammarMatcher` — token-by-token constrained decoding, including
-  `is_completed()` (root-rule match without stop token) and `fork()` for
-  speculative / branching decoding.
+  `is_completed()` (root-rule match without stop token), `fork()` for
+  speculative / branching decoding, and `traverse_draft_tree()` for filling
+  per-node token bitmasks over a speculative-decoding draft tree.
 - `BatchGrammarMatcher` — batched helpers operating on a slice of matchers:
   `batch_fill_next_token_bitmask` (parallel, thread-pool-backed),
   `batch_accept_token`, `batch_accept_string`, `batch_rollback`
   (sequential static helpers).
+- Serialization — `serialize_json()` / `deserialize_json()` on `Grammar`,
+  `CompiledGrammar`, and `TokenizerInfo` for persisting compilation results
+  (version-locked to the vendored xgrammar's serialization format).
+- Typed errors — `XGrammarErr` variants mirror the upstream xgrammar exception
+  types via `XGrammarError::GetType()` (`InvalidJson`, `InvalidStructuralTag`,
+  `DeserializeVersion`, `DeserializeFormat`, ...), with the previous
+  coarse-grained variants kept as fallbacks for untyped C++ errors.
 - Linux `x86_64` and `aarch64` (arm64) are both supported.
 
 See the [rustdoc](https://docs.rs/xgrammar/latest/xgrammar/) for detailed method-level documentation, including when a
@@ -42,7 +50,7 @@ The C++ `xgrammar` library is included as a submodule and will be compiled autom
 To build the project, run the following command:
 
 ```bash
-git clone --recurse-submodules https://github.com/furiosa-ai/xgrammar-rs.git
+git clone https://github.com/furiosa-ai/xgrammar-rs.git --recurse-submodules
 cd xgrammar-rs
 cargo build --release
 ```

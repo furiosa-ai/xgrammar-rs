@@ -63,3 +63,46 @@ fn test_tokenizer_info() {
         assert_eq!(tokenizer.get_vocab_size(true), tokenizer_info.get_vocab_size() as usize);
     }
 }
+
+/// Round-trip TokenizerInfo through serialize_json / deserialize_json.
+#[test]
+fn test_tokenizer_info_serialize_roundtrip() {
+    let tokenizer_info = TokenizerInfo::from_pretrained("openai/gpt-oss-20b", None, None, None)
+        .expect("Failed to load tokenizer info");
+
+    let json = tokenizer_info.serialize_json();
+    assert!(!json.is_empty());
+
+    let restored = TokenizerInfo::deserialize_json(&json).expect("deserialization should succeed");
+    assert_eq!(restored.get_vocab_size(), tokenizer_info.get_vocab_size());
+    assert_eq!(restored.get_vocab_type(), tokenizer_info.get_vocab_type());
+    assert_eq!(restored.get_add_prefix_space(), tokenizer_info.get_add_prefix_space());
+
+    // Serializing the restored info must reproduce the same JSON.
+    assert_eq!(json, restored.serialize_json());
+
+    // The vocab survives byte-for-byte except for tokens containing NUL:
+    // xgrammar v0.2.3 truncates strings at the first NUL byte during
+    // serialization (ByteToLatin1 in cpp/support/encoding.h iterates with
+    // C-string semantics), so such tokens come back truncated.
+    let original_vocab = tokenizer_info.get_decoded_vocab();
+    let restored_vocab = restored.get_decoded_vocab();
+    assert_eq!(original_vocab.len(), restored_vocab.len());
+    for (i, (original, restored)) in original_vocab.iter().zip(restored_vocab.iter()).enumerate() {
+        let expected = match original.find('\0') {
+            Some(nul_idx) => &original[..nul_idx],
+            None => original.as_str(),
+        };
+        assert_eq!(restored.as_str(), expected, "vocab mismatch at token id {i}");
+    }
+}
+
+#[test]
+fn test_tokenizer_info_deserialize_error() {
+    use xgrammar::XGrammarErr;
+
+    let Err(XGrammarErr::InvalidJson(err_msg)) = TokenizerInfo::deserialize_json("not json") else {
+        panic!("Expected InvalidJson");
+    };
+    assert!(err_msg.contains("Invalid JSON error"), "unexpected message: {err_msg}");
+}
