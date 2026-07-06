@@ -71,6 +71,33 @@ fn test_from_structural_tag_invalid_json() {
     assert!(err_msg.contains("Invalid JSON error"), "unexpected message: {err_msg}");
 }
 
+/// A structurally valid tag whose embedded sub-grammar is invalid: upstream
+/// throws an untyped error from the converter instead of returning the typed
+/// variant. Regression test — this used to escape the FFI boundary and abort
+/// the process.
+#[test]
+fn test_from_structural_tag_invalid_embedded_regex() {
+    let structural_tag = json!({
+        "format": {"type": "regex", "pattern": ")"}
+    });
+    let result = Grammar::from_structural_tag(&structural_tag.to_string(), None);
+    let Err(XGrammarErr::InvalidGrammar(err_msg)) = result else {
+        panic!("Expected InvalidGrammar");
+    };
+    assert!(err_msg.contains("Regex parsing error"), "unexpected message: {err_msg}");
+}
+
+/// An interior NUL byte must surface as an error, not a panic: the input is
+/// marshaled as pointer + length.
+#[test]
+fn test_from_structural_tag_nul_input() {
+    let result = Grammar::from_structural_tag("{\u{0}", None);
+    let Err(XGrammarErr::InvalidJson(err_msg)) = result else {
+        panic!("Expected InvalidJson");
+    };
+    assert!(err_msg.contains("Invalid JSON error"), "unexpected message: {err_msg}");
+}
+
 #[test]
 fn test_builtin_json_grammar() {
     let grammar = Grammar::builtin_json_grammar();
@@ -180,12 +207,21 @@ fn test_grammar_deserialize_garbage() {
 
 #[test]
 fn test_grammar_deserialize_missing_version() {
-    // A well-formed JSON object without the serialization version marker.
-    let result = Grammar::deserialize_json("{}");
-    match result {
-        Err(XGrammarErr::DeserializeVersion(_)) | Err(XGrammarErr::DeserializeFormat(_)) => {}
-        _ => panic!("Expected DeserializeVersion or DeserializeFormat"),
-    }
+    // A well-formed JSON object without the serialization version marker:
+    // upstream checks the version before any structural deserialization.
+    let Err(XGrammarErr::DeserializeVersion(err_msg)) = Grammar::deserialize_json("{}") else {
+        panic!("Expected DeserializeVersion");
+    };
+    assert!(err_msg.contains("Missing version"), "unexpected message: {err_msg}");
+}
+
+#[test]
+fn test_grammar_deserialize_non_object() {
+    // Valid JSON that is not an object bypasses the typed error construction
+    // upstream and surfaces as the untyped fallback for this type.
+    let Err(XGrammarErr::InvalidGrammar(_)) = Grammar::deserialize_json("[1, 2, 3]") else {
+        panic!("Expected InvalidGrammar");
+    };
 }
 
 #[test]

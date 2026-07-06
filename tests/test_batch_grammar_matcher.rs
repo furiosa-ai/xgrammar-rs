@@ -98,8 +98,7 @@ fn test_batch_fill_next_token_bitmask() {
     let prefills = ["{\"a\":", "{\"b\":", "{\"c\":"];
     BatchGrammarMatcher::batch_accept_string(&mut matchers, &prefills, None);
 
-    let vocab_size = tokenizer_info.get_vocab_size() as usize;
-    let bitmask_len = vocab_size.div_ceil(32);
+    let bitmask_len = xgrammar::get_bitmask_size(tokenizer_info.get_vocab_size()) as usize;
     let shape = [matchers.len(), bitmask_len];
     let bitmask = ArrayD::from_shape_vec(IxDyn(&shape), vec![0i32; matchers.len() * bitmask_len])
         .expect("fail to create bitmask");

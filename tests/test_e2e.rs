@@ -55,7 +55,7 @@ pub fn generate_dummy_text(
 
     let mut rng = StdRng::seed_from_u64(seed);
     let vocab_size = tokenizer.get_vocab_size(true);
-    let bitmask_len = vocab_size.div_ceil(32);
+    let bitmask_len = xgrammar::get_bitmask_size(vocab_size as i32) as usize;
     let mut sampled: Vec<u32> = Vec::with_capacity(max_generation);
 
     tracing::info!(
