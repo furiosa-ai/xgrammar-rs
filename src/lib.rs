@@ -1,4 +1,4 @@
-#![recursion_limit = "256"]
+#![recursion_limit = "512"]
 //! Safe, idiomatic Rust bindings for the [xgrammar](https://github.com/mlc-ai/xgrammar)
 //! C++ library for constrained decoding of large language models.
 //!
@@ -13,12 +13,23 @@
 //!   compile grammars (BNF, JSON schema, regex, structural tags) against a
 //!   tokenizer.
 //! - [`GrammarMatcher`] — token-by-token constrained decoding, including
-//!   [`GrammarMatcher::is_completed`] (root-rule match without stop token) and
-//!   [`GrammarMatcher::fork`] for speculative / branching decoding.
+//!   [`GrammarMatcher::is_completed`] (root-rule match without stop token),
+//!   [`GrammarMatcher::fork`] for speculative / branching decoding, and
+//!   [`GrammarMatcher::traverse_draft_tree`] for filling per-node token
+//!   bitmasks over a speculative-decoding draft tree.
 //! - [`BatchGrammarMatcher`] — batched helpers over a slice of matchers:
 //!   [`BatchGrammarMatcher::batch_fill_next_token_bitmask`] is parallel and
 //!   thread-pool-backed; `batch_accept_token` / `batch_accept_string` /
 //!   `batch_rollback` are sequential static helpers.
+//! - Serialization — `serialize_json` / `deserialize_json` on [`Grammar`],
+//!   [`CompiledGrammar`], and [`TokenizerInfo`] for persisting compilation
+//!   results (version-locked to the vendored xgrammar's serialization format).
+//! - Typed errors — [`XGrammarErr`] variants mirror the upstream xgrammar
+//!   exception types via `XGrammarError::GetType()`
+//!   ([`XGrammarErr::InvalidJson`], [`XGrammarErr::InvalidStructuralTag`],
+//!   [`XGrammarErr::DeserializeVersion`], [`XGrammarErr::DeserializeFormat`],
+//!   ...), with the coarse-grained variants kept as fallbacks for untyped C++
+//!   errors.
 //!
 //! See each item's documentation for usage details, including when a
 //! `BatchGrammarMatcher` instance is required vs when associated functions can
@@ -39,7 +50,8 @@ pub use error::XGrammarErr;
 use serde_json::Value;
 pub use tokenizers;
 
-type Result<T> = std::result::Result<T, XGrammarErr>;
+/// Alias for `std::result::Result<T, XGrammarErr>`.
+pub type Result<T> = std::result::Result<T, XGrammarErr>;
 
 pub type VocabMap = std::collections::HashMap<String, u32>;
 
@@ -59,22 +71,73 @@ cpp! {{
         bool add_prefix_space;
     };
 
+    // Discriminants for the xgrammar::XGrammarError subclasses, derived from
+    // XGrammarError::GetType(). Keep the numeric values in sync with the Rust
+    // `CppErrorKind` enum defined alongside the result-struct mirrors.
+    enum XGErrorKind : int32_t {
+        kXGOtherError = 0,
+        kXGDeserializeVersionError = 1,
+        kXGInvalidJSONError = 2,
+        kXGDeserializeFormatError = 3,
+        kXGInvalidJSONSchemaError = 4,
+        kXGInvalidStructuralTagError = 5,
+    };
+
+    static int32_t xgr_error_kind(const xgrammar::XGrammarError& e) {
+        const std::string t = e.GetType();
+        if (t == "DeserializeVersionError") return kXGDeserializeVersionError;
+        if (t == "InvalidJSONError") return kXGInvalidJSONError;
+        if (t == "DeserializeFormatError") return kXGDeserializeFormatError;
+        if (t == "InvalidJSONSchemaError") return kXGInvalidJSONSchemaError;
+        if (t == "InvalidStructuralTagError") return kXGInvalidStructuralTagError;
+        return kXGOtherError;
+    }
+
+    // Extract the message and typed error kind from a std::variant of
+    // XGrammarError subclasses (xgrammar::SerializationError or
+    // xgrammar::StructuralTagError). The visitor can take the base reference
+    // because every variant alternative derives from XGrammarError.
+    template <typename V>
+    static char* xgr_dup_variant_error(const V& error, int32_t* error_kind) {
+        std::string error_msg;
+        std::visit([&](const xgrammar::XGrammarError& err) {
+            error_msg = err.what();
+            *error_kind = xgr_error_kind(err);
+        }, error);
+        return strdup(error_msg.c_str());
+    }
+
+    // Keep the layout of every *Result struct in sync with its #[repr(C)]
+    // mirror on the Rust side. `error_kind` (an XGErrorKind value) is
+    // deliberately the LAST field: C++ aggregate initialization zero-fills
+    // omitted trailing members, so an init site that forgets it degrades to
+    // kind 0 (context fallback) instead of undefined behavior.
     struct GrammarResult {
         bool success;
         Grammar grammar;
         char* error_message;
+        int32_t error_kind;
     };
 
     struct CompiledGrammarResult {
         bool success;
         CompiledGrammar compiled_grammar;
         char* error_message;
+        int32_t error_kind;
     };
 
     struct MatcherResult {
         bool success;
         bool value;
         char* error_message;
+        int32_t error_kind;
+    };
+
+    struct TokenizerInfoResult {
+        bool success;
+        TokenizerInfo tokenizer_info;
+        char* error_message;
+        int32_t error_kind;
     };
 }}
 
@@ -127,11 +190,46 @@ unsafe fn extract_and_free_error_message(error_message_ptr: *mut std::os::raw::c
     }
 }
 
+/// Copy a C++-owned byte buffer into `*out` as a Rust `String`. Shared body of
+/// the `rust!` callbacks in the `serialize_json` bindings.
+///
+/// The buffer is marshaled as `*const u8` (not `c_char`) so no platform-varying
+/// cast is needed (`c_char` is `i8` on x86_64 but `u8` on arm64). The upstream
+/// serializer maps raw bytes to Latin-1 code points (`ByteToLatin1`), so the
+/// JSON text is valid UTF-8 by construction; the lossy conversion is defensive
+/// only.
+///
+/// # Safety
+/// `data`/`len` must describe a readable buffer that outlives the call, and
+/// `out` must point to a live `String`.
+unsafe fn assign_utf8_lossy(out: *mut String, data: *const u8, len: usize) {
+    let slice = unsafe { std::slice::from_raw_parts(data, len) };
+    unsafe { *out = String::from_utf8_lossy(slice).into_owned() };
+}
+
+/// Map a C++ `XGErrorKind` discriminant + message to a precise
+/// [`XGrammarErr`], falling back to the per-result-type context variant when
+/// the exception was untyped (kind 0, e.g. a plain `std::runtime_error` from
+/// `XGRAMMAR_CHECK`). Keep the discriminants in sync with `XGErrorKind` in the
+/// `cpp!{{...}}` block above; an out-of-range value degrades to the fallback.
+fn error_from_kind(raw_kind: i32, msg: String, fallback: fn(String) -> XGrammarErr) -> XGrammarErr {
+    match raw_kind {
+        1 => XGrammarErr::DeserializeVersion(msg),
+        2 => XGrammarErr::InvalidJson(msg),
+        3 => XGrammarErr::DeserializeFormat(msg),
+        4 => XGrammarErr::InvalidJsonSchema(msg),
+        5 => XGrammarErr::InvalidStructuralTag(msg),
+        _ => fallback(msg),
+    }
+}
+
+// Keep in sync with the `GrammarResult` C++ struct in the cpp!{{...}} block.
 #[repr(C)]
 pub(crate) struct GrammarResult {
     pub success: bool,
     pub grammar: Grammar,
     pub error_message: *mut std::os::raw::c_char,
+    pub error_kind: i32,
 }
 
 impl Drop for GrammarResult {
@@ -157,16 +255,18 @@ impl From<GrammarResult> for Result<Grammar> {
         } else {
             // SAFETY: error_message is valid and we're taking ownership
             let error_msg = unsafe { extract_and_free_error_message(result.error_message) };
-            Err(XGrammarErr::InvalidGrammar(error_msg))
+            Err(error_from_kind(result.error_kind, error_msg, XGrammarErr::InvalidGrammar))
         }
     }
 }
 
+// Keep in sync with the `CompiledGrammarResult` C++ struct in the cpp!{{...}} block.
 #[repr(C)]
 pub(crate) struct CompiledGrammarResult {
     pub success: bool,
     pub compiled_grammar: CompiledGrammar,
     pub error_message: *mut std::os::raw::c_char,
+    pub error_kind: i32,
 }
 
 impl Drop for CompiledGrammarResult {
@@ -192,16 +292,18 @@ impl From<CompiledGrammarResult> for Result<CompiledGrammar> {
         } else {
             // SAFETY: error_message is valid and we're taking ownership
             let error_msg = unsafe { extract_and_free_error_message(result.error_message) };
-            Err(XGrammarErr::CompilationError(error_msg))
+            Err(error_from_kind(result.error_kind, error_msg, XGrammarErr::CompilationError))
         }
     }
 }
 
+// Keep in sync with the `MatcherResult` C++ struct in the cpp!{{...}} block.
 #[repr(C)]
 pub(crate) struct MatcherResult {
     pub success: bool,
     pub value: bool,
     pub error_message: *mut std::os::raw::c_char,
+    pub error_kind: i32,
 }
 
 impl Drop for MatcherResult {
@@ -226,7 +328,7 @@ impl From<MatcherResult> for Result<bool> {
         } else {
             // SAFETY: error_message is valid and we're taking ownership
             let error_msg = unsafe { extract_and_free_error_message(result.error_message) };
-            Err(XGrammarErr::MatcherError(error_msg))
+            Err(error_from_kind(result.error_kind, error_msg, XGrammarErr::MatcherError))
         }
     }
 }
@@ -243,7 +345,44 @@ impl From<MatcherResult> for Result<()> {
         } else {
             // SAFETY: error_message is valid and we're taking ownership
             let error_msg = unsafe { extract_and_free_error_message(result.error_message) };
-            Err(XGrammarErr::MatcherError(error_msg))
+            Err(error_from_kind(result.error_kind, error_msg, XGrammarErr::MatcherError))
+        }
+    }
+}
+
+// Keep in sync with the `TokenizerInfoResult` C++ struct in the cpp!{{...}} block.
+#[repr(C)]
+pub(crate) struct TokenizerInfoResult {
+    pub success: bool,
+    pub tokenizer_info: TokenizerInfo,
+    pub error_message: *mut std::os::raw::c_char,
+    pub error_kind: i32,
+}
+
+impl Drop for TokenizerInfoResult {
+    fn drop(&mut self) {
+        if !self.error_message.is_null() {
+            unsafe {
+                libc::free(self.error_message as *mut libc::c_void);
+            }
+        }
+    }
+}
+
+impl From<TokenizerInfoResult> for Result<TokenizerInfo> {
+    fn from(result: TokenizerInfoResult) -> Self {
+        use std::mem::ManuallyDrop;
+
+        // Wrap in ManuallyDrop to prevent automatic drop
+        let result = ManuallyDrop::new(result);
+
+        if result.success {
+            // SAFETY: We're taking ownership and preventing double-free by using ManuallyDrop
+            unsafe { Ok(std::ptr::read(&result.tokenizer_info)) }
+        } else {
+            // SAFETY: error_message is valid and we're taking ownership
+            let error_msg = unsafe { extract_and_free_error_message(result.error_message) };
+            Err(error_from_kind(result.error_kind, error_msg, XGrammarErr::InvalidTokenizerConfig))
         }
     }
 }
@@ -479,6 +618,77 @@ impl TokenizerInfo {
         out
     }
 
+    /// Serialize the tokenizer info to a JSON string.
+    ///
+    /// The output is version-locked like [`Grammar::serialize_json`].
+    ///
+    /// Non-UTF-8 vocab bytes survive the round-trip (the upstream serializer
+    /// maps raw bytes to Latin-1 code points, so the JSON text is always valid
+    /// UTF-8), with one upstream limitation: vocab tokens containing a NUL
+    /// byte are truncated at the first NUL during serialization (xgrammar
+    /// v0.2.3, `ByteToLatin1` in `cpp/support/encoding.h`).
+    pub fn serialize_json(&self) -> String {
+        let mut out = String::new();
+        let out_ptr = &mut out as *mut String;
+        cpp!(unsafe [self as "const xgrammar::TokenizerInfo*", out_ptr as "void*"] {
+            std::string json = self->SerializeJSON();
+            const uint8_t* data = reinterpret_cast<const uint8_t*>(json.data());
+            size_t len = json.size();
+            rust!(XGR_TokInfo_Serialize_set [
+                out_ptr: *mut String as "void*",
+                data: *const u8 as "const uint8_t*",
+                len: usize as "size_t"
+            ] {
+                // SAFETY: `data`/`len` point into the C++ std::string, which
+                // outlives this call; `out_ptr` comes from a live `&mut String`.
+                unsafe { crate::assign_utf8_lossy(out_ptr, data, len) };
+            });
+        });
+        out
+    }
+
+    /// Deserialize a tokenizer info from a JSON string produced by
+    /// [`Self::serialize_json`].
+    ///
+    /// # Errors
+    /// * [`XGrammarErr::DeserializeVersion`] if the data was serialized by an
+    ///   incompatible xgrammar serialization version
+    /// * [`XGrammarErr::InvalidJson`] if the input is not valid JSON
+    /// * [`XGrammarErr::DeserializeFormat`] if the JSON does not have the
+    ///   expected structure
+    pub fn deserialize_json(json: &str) -> Result<Self> {
+        // Pointer + length marshaling — see Grammar::deserialize_json for the
+        // rationale.
+        let json_ptr = json.as_ptr();
+        let json_len = json.len();
+
+        let result = cpp!(unsafe [
+            json_ptr as "const uint8_t*",
+            json_len as "size_t"
+        ] -> TokenizerInfoResult as "TokenizerInfoResult" {
+            try {
+                std::string json_str(reinterpret_cast<const char*>(json_ptr), json_len);
+                auto result = xgrammar::TokenizerInfo::DeserializeJSON(json_str);
+
+                if (std::holds_alternative<xgrammar::TokenizerInfo>(result)) {
+                    return {true, std::get<xgrammar::TokenizerInfo>(result), nullptr, 0};
+                } else {
+                    int32_t error_kind = kXGOtherError;
+                    char* error_message = xgr_dup_variant_error(
+                        std::get<xgrammar::SerializationError>(result), &error_kind
+                    );
+                    return {false, TokenizerInfo(NullObj()), error_message, error_kind};
+                }
+            } catch (const xgrammar::XGrammarError& e) {
+                return {false, TokenizerInfo(NullObj()), strdup(e.what()), xgr_error_kind(e)};
+            } catch (const std::exception& e) {
+                return {false, TokenizerInfo(NullObj()), strdup(e.what()), 0};
+            }
+        });
+
+        result.into()
+    }
+
     fn detect_metadata_from_hf(backend_str: &str) -> MetadataFromHF {
         let backend_str =
             CString::new(backend_str).expect("Failed to convert backend_str to CString");
@@ -521,6 +731,80 @@ impl CompiledGrammar {
         cpp!(unsafe [self as "const xgrammar::CompiledGrammar*"] -> usize as "size_t" {
             return self->MemorySizeBytes();
         })
+    }
+
+    /// Serialize the compiled grammar to a JSON string.
+    ///
+    /// The output contains the grammar and the precomputed token masks, but
+    /// **not** the tokenizer info — the same tokenizer info must be supplied
+    /// again to [`Self::deserialize_json`]. It is version-locked like
+    /// [`Grammar::serialize_json`].
+    pub fn serialize_json(&self) -> String {
+        let mut out = String::new();
+        let out_ptr = &mut out as *mut String;
+        cpp!(unsafe [self as "const xgrammar::CompiledGrammar*", out_ptr as "void*"] {
+            std::string json = self->SerializeJSON();
+            const uint8_t* data = reinterpret_cast<const uint8_t*>(json.data());
+            size_t len = json.size();
+            rust!(XGR_CompiledGrammar_Serialize_set [
+                out_ptr: *mut String as "void*",
+                data: *const u8 as "const uint8_t*",
+                len: usize as "size_t"
+            ] {
+                // SAFETY: `data`/`len` point into the C++ std::string, which
+                // outlives this call; `out_ptr` comes from a live `&mut String`.
+                unsafe { crate::assign_utf8_lossy(out_ptr, data, len) };
+            });
+        });
+        out
+    }
+
+    /// Deserialize a compiled grammar from a JSON string produced by
+    /// [`Self::serialize_json`], re-attaching the given tokenizer info.
+    ///
+    /// # Arguments
+    /// * `json` - The serialized compiled grammar
+    /// * `tokenizer_info` - The tokenizer info the grammar was compiled
+    ///   against (not part of the serialized data)
+    ///
+    /// # Errors
+    /// * [`XGrammarErr::DeserializeVersion`] if the data was serialized by an
+    ///   incompatible xgrammar serialization version
+    /// * [`XGrammarErr::InvalidJson`] if the input is not valid JSON
+    /// * [`XGrammarErr::DeserializeFormat`] if the JSON does not have the
+    ///   expected structure
+    pub fn deserialize_json(json: &str, tokenizer_info: &TokenizerInfo) -> Result<Self> {
+        // Pointer + length marshaling — see Grammar::deserialize_json for the
+        // rationale.
+        let json_ptr = json.as_ptr();
+        let json_len = json.len();
+
+        let result = cpp!(unsafe [
+            json_ptr as "const uint8_t*",
+            json_len as "size_t",
+            tokenizer_info as "const xgrammar::TokenizerInfo*"
+        ] -> CompiledGrammarResult as "CompiledGrammarResult" {
+            try {
+                std::string json_str(reinterpret_cast<const char*>(json_ptr), json_len);
+                auto result = xgrammar::CompiledGrammar::DeserializeJSON(json_str, *tokenizer_info);
+
+                if (std::holds_alternative<xgrammar::CompiledGrammar>(result)) {
+                    return {true, std::get<xgrammar::CompiledGrammar>(result), nullptr, 0};
+                } else {
+                    int32_t error_kind = kXGOtherError;
+                    char* error_message = xgr_dup_variant_error(
+                        std::get<xgrammar::SerializationError>(result), &error_kind
+                    );
+                    return {false, CompiledGrammar(NullObj()), error_message, error_kind};
+                }
+            } catch (const xgrammar::XGrammarError& e) {
+                return {false, CompiledGrammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
+            } catch (const std::exception& e) {
+                return {false, CompiledGrammar(NullObj()), strdup(e.what()), 0};
+            }
+        });
+
+        result.into()
     }
 }
 
@@ -612,9 +896,11 @@ impl GrammarCompiler {
         ] -> CompiledGrammarResult as "CompiledGrammarResult" {
             try {
                 auto compiled = self->CompileGrammar(*grammar);
-                return {true, compiled, nullptr};
+                return {true, compiled, nullptr, 0};
+            } catch (const xgrammar::XGrammarError& e) {
+                return {false, CompiledGrammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, CompiledGrammar(NullObj()), strdup(e.what())};
+                return {false, CompiledGrammar(NullObj()), strdup(e.what()), 0};
             }
         });
 
@@ -646,9 +932,11 @@ impl GrammarCompiler {
         let result = cpp!(unsafe [self as "xgrammar::GrammarCompiler*"] -> CompiledGrammarResult as "CompiledGrammarResult" {
             try {
                 auto compiled = self->CompileBuiltinJSONGrammar();
-                return {true, compiled, nullptr};
+                return {true, compiled, nullptr, 0};
+            } catch (const xgrammar::XGrammarError& e) {
+                return {false, CompiledGrammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, CompiledGrammar(NullObj()), strdup(e.what())};
+                return {false, CompiledGrammar(NullObj()), strdup(e.what()), 0};
             }
         });
 
@@ -745,9 +1033,11 @@ impl GrammarCompiler {
                 std::optional<int> opt_max_whitespace_cnt = has_max_whitespace_cnt ? std::make_optional(max_whitespace_cnt_value) : std::nullopt;
 
                 auto compiled = self->CompileJSONSchema(schema_str, any_whitespace, opt_indent, opt_separators, strict_mode, opt_max_whitespace_cnt);
-                return {true, compiled, nullptr};
+                return {true, compiled, nullptr, 0};
+            } catch (const xgrammar::XGrammarError& e) {
+                return {false, CompiledGrammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, CompiledGrammar(NullObj()), strdup(e.what())};
+                return {false, CompiledGrammar(NullObj()), strdup(e.what()), 0};
             }
         });
 
@@ -790,9 +1080,11 @@ impl GrammarCompiler {
             try {
                 std::string regex_str(regex_ptr);
                 auto compiled = self->CompileRegex(regex_str);
-                return {true, compiled, nullptr};
+                return {true, compiled, nullptr, 0};
+            } catch (const xgrammar::XGrammarError& e) {
+                return {false, CompiledGrammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, CompiledGrammar(NullObj()), strdup(e.what())};
+                return {false, CompiledGrammar(NullObj()), strdup(e.what()), 0};
             }
         });
 
@@ -867,9 +1159,11 @@ impl GrammarCompiler {
             try {
                 std::string structural_tag_json_str(structural_tag_json_ptr);
                 auto compiled = self->CompileStructuralTag(structural_tag_json_str);
-                return {true, compiled, nullptr};
+                return {true, compiled, nullptr, 0};
+            } catch (const xgrammar::XGrammarError& e) {
+                return {false, CompiledGrammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, CompiledGrammar(NullObj()), strdup(e.what())};
+                return {false, CompiledGrammar(NullObj()), strdup(e.what()), 0};
             }
         });
 
@@ -945,9 +1239,11 @@ impl Grammar {
         ] -> GrammarResult as "GrammarResult" {
             try {
                 auto grammar = Grammar::FromEBNF(string(ebnf_string_ptr), string(root_rule_name_ptr));
-                return {true, grammar, nullptr};
+                return {true, grammar, nullptr, 0};
+            } catch (const xgrammar::XGrammarError& e) {
+                return {false, Grammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, Grammar(NullObj()), strdup(e.what())};
+                return {false, Grammar(NullObj()), strdup(e.what()), 0};
             }
         });
 
@@ -1076,9 +1372,11 @@ impl Grammar {
                     opt_max_whitespace_cnt,
                     print_converted_ebnf
                 );
-                return {true, grammar, nullptr};
+                return {true, grammar, nullptr, 0};
+            } catch (const xgrammar::XGrammarError& e) {
+                return {false, Grammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, Grammar(NullObj()), strdup(e.what())};
+                return {false, Grammar(NullObj()), strdup(e.what()), 0};
             }
         });
 
@@ -1125,9 +1423,11 @@ impl Grammar {
         ] -> GrammarResult as "GrammarResult" {
             try {
                 auto grammar = Grammar::FromRegex(string(regex_ptr), print_converted_ebnf);
-                return {true, grammar, nullptr};
+                return {true, grammar, nullptr, 0};
+            } catch (const xgrammar::XGrammarError& e) {
+                return {false, Grammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, Grammar(NullObj()), strdup(e.what())};
+                return {false, Grammar(NullObj()), strdup(e.what()), 0};
             }
         });
 
@@ -1158,6 +1458,11 @@ impl Grammar {
     /// # Returns
     /// * `Ok(Grammar)` if the JSON is valid and the grammar was successfully created
     /// * `Err(XGrammarErr)` if the JSON is invalid or the structural tag is malformed
+    ///
+    /// # Errors
+    /// * [`XGrammarErr::InvalidJson`] if the input is not valid JSON
+    /// * [`XGrammarErr::InvalidStructuralTag`] if the structural tag specification is invalid
+    /// * [`XGrammarErr::InvalidJsonSchema`] if an embedded JSON schema is invalid
     ///
     /// # Example
     /// ```
@@ -1217,18 +1522,13 @@ impl Grammar {
 
             // Check if result holds a Grammar or an error
             if (std::holds_alternative<xgrammar::Grammar>(result)) {
-                return {true, std::get<xgrammar::Grammar>(result), nullptr};
+                return {true, std::get<xgrammar::Grammar>(result), nullptr, 0};
             } else {
-                auto error = std::get<xgrammar::StructuralTagError>(result);
-
-                // Extract error message from the variant
-                std::string error_msg;
-                std::visit([&error_msg](auto&& err) {
-                    error_msg = err.what();
-                }, error);
-
-                // Allocate and copy error message
-                return {false, Grammar(NullObj()), strdup(error_msg.c_str())};
+                int32_t error_kind = kXGOtherError;
+                char* error_message = xgr_dup_variant_error(
+                    std::get<xgrammar::StructuralTagError>(result), &error_kind
+                );
+                return {false, Grammar(NullObj()), error_message, error_kind};
             }
         });
 
@@ -1349,6 +1649,98 @@ impl Grammar {
             return self->IsNull();
         })
     }
+
+    /// Serialize the grammar to a JSON string.
+    ///
+    /// The output is tied to xgrammar's internal serialization version (v14 as
+    /// of the vendored xgrammar v0.2.3): it can only be read back by
+    /// [`Self::deserialize_json`] of a build using the same serialization
+    /// version.
+    ///
+    /// # Example
+    /// ```
+    /// # use xgrammar::Grammar;
+    /// let grammar = Grammar::builtin_json_grammar();
+    /// let json = grammar.serialize_json();
+    /// let restored = Grammar::deserialize_json(&json).unwrap();
+    /// assert_eq!(json, restored.serialize_json());
+    /// ```
+    pub fn serialize_json(&self) -> String {
+        let mut out = String::new();
+        let out_ptr = &mut out as *mut String;
+        cpp!(unsafe [self as "const xgrammar::Grammar*", out_ptr as "void*"] {
+            std::string json = self->SerializeJSON();
+            const uint8_t* data = reinterpret_cast<const uint8_t*>(json.data());
+            size_t len = json.size();
+            rust!(XGR_Grammar_Serialize_set [
+                out_ptr: *mut String as "void*",
+                data: *const u8 as "const uint8_t*",
+                len: usize as "size_t"
+            ] {
+                // SAFETY: `data`/`len` point into the C++ std::string, which
+                // outlives this call; `out_ptr` comes from a live `&mut String`.
+                unsafe { crate::assign_utf8_lossy(out_ptr, data, len) };
+            });
+        });
+        out
+    }
+
+    /// Deserialize a grammar from a JSON string produced by
+    /// [`Self::serialize_json`].
+    ///
+    /// # Errors
+    /// * [`XGrammarErr::DeserializeVersion`] if the data was serialized by an
+    ///   incompatible xgrammar serialization version
+    /// * [`XGrammarErr::InvalidJson`] if the input is not valid JSON
+    /// * [`XGrammarErr::DeserializeFormat`] if the JSON does not have the
+    ///   expected structure
+    pub fn deserialize_json(json: &str) -> Result<Self> {
+        // Marshal as pointer + length (not CString): the input is untrusted,
+        // and an interior NUL byte must surface as a deserialization error
+        // rather than a panic.
+        let json_ptr = json.as_ptr();
+        let json_len = json.len();
+
+        let result = cpp!(unsafe [
+            json_ptr as "const uint8_t*",
+            json_len as "size_t"
+        ] -> GrammarResult as "GrammarResult" {
+            try {
+                std::string json_str(reinterpret_cast<const char*>(json_ptr), json_len);
+                auto result = xgrammar::Grammar::DeserializeJSON(json_str);
+
+                if (std::holds_alternative<xgrammar::Grammar>(result)) {
+                    return {true, std::get<xgrammar::Grammar>(result), nullptr, 0};
+                } else {
+                    int32_t error_kind = kXGOtherError;
+                    char* error_message = xgr_dup_variant_error(
+                        std::get<xgrammar::SerializationError>(result), &error_kind
+                    );
+                    return {false, Grammar(NullObj()), error_message, error_kind};
+                }
+            } catch (const xgrammar::XGrammarError& e) {
+                return {false, Grammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
+            } catch (const std::exception& e) {
+                return {false, Grammar(NullObj()), strdup(e.what()), 0};
+            }
+        });
+
+        result.into()
+    }
+}
+
+/// Return the number of `i32` elements required per token-bitmask row for a
+/// vocabulary of `vocab_size` tokens, i.e. `ceil(vocab_size / 32)`.
+///
+/// Use this to size the bitmask tensors passed to
+/// [`GrammarMatcher::fill_next_token_bitmask`],
+/// [`GrammarMatcher::traverse_draft_tree`] and
+/// [`BatchGrammarMatcher::batch_fill_next_token_bitmask`]. Mirrors the
+/// upstream free function `xgrammar::GetBitmaskSize`.
+pub fn get_bitmask_size(vocab_size: i32) -> i32 {
+    cpp!(unsafe [vocab_size as "int"] -> i32 as "int32_t" {
+        return xgrammar::GetBitmaskSize(vocab_size);
+    })
 }
 
 impl GrammarMatcher {
@@ -1456,7 +1848,8 @@ impl GrammarMatcher {
     ///
     /// # Arguments
     /// * `next_token_bitmask` - The bitmask to store the result. The bitmask must be pre-allocated
-    ///   a DLTensor with shape (tokenizer.GetVocabSize() + 31) / 32, and dtype int32.
+    ///   a DLTensor with shape (tokenizer.GetVocabSize() + 31) / 32 (see [`get_bitmask_size`]),
+    ///   and dtype int32.
     /// * `index` - The index of the bitmask to fill. If None, the first bitmask is filled.
     /// * `debug_print` - If true, print debug information.
     ///
@@ -1480,9 +1873,124 @@ impl GrammarMatcher {
         let result = cpp!(unsafe [self as "xgrammar::GrammarMatcher*", dl_tensor as "DLTensor*", index as "int32_t", debug_print as "bool"] -> MatcherResult as "MatcherResult" {
             try {
                 bool value = self->FillNextTokenBitmask(dl_tensor, index, debug_print);
-                return {true, value, nullptr};
+                return {true, value, nullptr, 0};
+            } catch (const xgrammar::XGrammarError& e) {
+                return {false, false, strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, false, strdup(e.what())};
+                return {false, false, strdup(e.what()), 0};
+            }
+        });
+
+        result.into()
+    }
+
+    /// Traverse a draft token tree (speculative decoding) and fill one token
+    /// bitmask row per tree node.
+    ///
+    /// Performs a depth-first traversal of the draft tree: row `i` of
+    /// `token_bitmask` receives the set of tokens allowed *after* accepting the
+    /// draft tokens on the path from the root to node `i`. Verifying an entire
+    /// draft tree this way is much cheaper than replaying
+    /// [`Self::accept_token`] / [`Self::fill_next_token_bitmask`] /
+    /// [`Self::rollback`] per node from Rust.
+    ///
+    /// # Tree encoding
+    /// Node `0` is the root. `retrieve_next_token[i]` is the index of node
+    /// `i`'s first child, or `-1` if it has none; `retrieve_next_sibling[i]` is
+    /// the index of node `i`'s next sibling, or `-1`. The root must not have a
+    /// sibling (`retrieve_next_sibling[0] == -1`).
+    ///
+    /// `draft_tokens[0]` is ignored: the root token is the one already produced
+    /// by the target model, so its acceptance is not re-checked and row `0` is
+    /// simply the bitmask of the matcher's current state.
+    ///
+    /// # Arguments
+    /// * `retrieve_next_token` - 1-D `int64` CPU tensor of first-child indices.
+    /// * `retrieve_next_sibling` - 1-D `int64` CPU tensor of sibling indices.
+    /// * `draft_tokens` - 1-D `int64` CPU tensor of the draft token id at each node.
+    ///   All three tensors must have the same length `N >= 1` (the node count).
+    /// * `token_bitmask` - Pre-allocated 2-D `int32` CPU tensor of shape
+    ///   `(N, get_bitmask_size(vocab_size))` (see [`get_bitmask_size`]).
+    /// * `time_threshold` - Maximum traversal time in seconds; `None` (or a
+    ///   value `<= 0`) disables the timeout.
+    ///
+    /// # Node semantics
+    /// A draft token that is out of vocabulary range or not permitted by its
+    /// parent's bitmask row gets its row zeroed, and its **entire subtree is
+    /// skipped without touching the descendants' rows** (they keep whatever the
+    /// caller pre-filled). Traversal then continues with the node's siblings
+    /// and still returns `Ok(true)`. A node whose acceptance terminates the
+    /// matcher also gets a zeroed row.
+    ///
+    /// # Returns
+    /// * `Ok(true)` - The traversal completed. The matcher state is unchanged
+    ///   (internal accepts and rollbacks cancel out).
+    /// * `Ok(false)` - The traversal timed out. Row `0` is always filled (the
+    ///   timeout is only checked at non-root nodes), but other rows may be
+    ///   partial and the matcher state is not guaranteed to be restored — call
+    ///   [`Self::reset`] (or discard the matcher) before reusing it.
+    /// * `Err(XGrammarErr::MatcherError)` - A tensor has an invalid dtype,
+    ///   shape, or device type, or the tree encoding is invalid.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use xgrammar::{get_bitmask_size, CompiledGrammar, GrammarMatcher};
+    /// # use dlpark::versioned::SafeManagedTensorVersioned;
+    /// # use ndarray::{ArrayD, IxDyn};
+    /// # fn example(compiled: &CompiledGrammar) -> xgrammar::Result<()> {
+    /// let mut matcher = GrammarMatcher::new(compiled);
+    /// let vocab_size = compiled.get_tokenizer_info().get_vocab_size();
+    /// let bitmask_len = get_bitmask_size(vocab_size) as usize;
+    ///
+    /// // Linear draft tree: node 0 (root) -> node 1 -> node 2.
+    /// let next_token = SafeManagedTensorVersioned::new(vec![1i64, 2, -1]).unwrap();
+    /// let next_sibling = SafeManagedTensorVersioned::new(vec![-1i64, -1, -1]).unwrap();
+    /// let draft_tokens = SafeManagedTensorVersioned::new(vec![0i64, 123, 456]).unwrap();
+    /// let bitmask = ArrayD::from_elem(IxDyn(&[3, bitmask_len]), 0i32);
+    /// let mut bitmask = SafeManagedTensorVersioned::new(bitmask).unwrap();
+    ///
+    /// let completed = matcher.traverse_draft_tree(
+    ///     &next_token, &next_sibling, &draft_tokens, &mut bitmask, None,
+    /// )?;
+    /// assert!(completed);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn traverse_draft_tree(
+        &mut self,
+        retrieve_next_token: &DLTensor,
+        retrieve_next_sibling: &DLTensor,
+        draft_tokens: &DLTensor,
+        token_bitmask: &mut DLTensor,
+        time_threshold: Option<f64>,
+    ) -> Result<bool> {
+        let retrieve_next_token = retrieve_next_token.dl_tensor();
+        let retrieve_next_sibling = retrieve_next_sibling.dl_tensor();
+        let draft_tokens = draft_tokens.dl_tensor();
+        let token_bitmask = token_bitmask.dl_tensor();
+        let time_threshold = time_threshold.unwrap_or(-1.0);
+
+        let result = cpp!(unsafe [
+            self as "xgrammar::GrammarMatcher*",
+            retrieve_next_token as "const DLTensor*",
+            retrieve_next_sibling as "const DLTensor*",
+            draft_tokens as "const DLTensor*",
+            token_bitmask as "DLTensor*",
+            time_threshold as "double"
+        ] -> MatcherResult as "MatcherResult" {
+            try {
+                bool value = self->TraverseDraftTree(
+                    retrieve_next_token,
+                    retrieve_next_sibling,
+                    draft_tokens,
+                    token_bitmask,
+                    time_threshold
+                );
+                return {true, value, nullptr, 0};
+            } catch (const xgrammar::XGrammarError& e) {
+                return {false, false, strdup(e.what()), xgr_error_kind(e)};
+            } catch (const std::exception& e) {
+                return {false, false, strdup(e.what()), 0};
             }
         });
 
@@ -1507,9 +2015,11 @@ impl GrammarMatcher {
         let result = cpp!(unsafe [self as "xgrammar::GrammarMatcher*", num_tokens as "int"] -> MatcherResult as "MatcherResult" {
             try {
                 self->Rollback(num_tokens);
-                return {true, false, nullptr};
+                return {true, false, nullptr, 0};
+            } catch (const xgrammar::XGrammarError& e) {
+                return {false, false, strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, false, strdup(e.what())};
+                return {false, false, strdup(e.what()), 0};
             }
         });
 
@@ -1705,9 +2215,11 @@ impl BatchGrammarMatcher {
                 self->BatchFillNextTokenBitmask(
                     &matchers_vec, dl_tensor, opt_indices, debug_print
                 );
-                return {true, false, nullptr};
+                return {true, false, nullptr, 0};
+            } catch (const xgrammar::XGrammarError& e) {
+                return {false, false, strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, false, strdup(e.what())};
+                return {false, false, strdup(e.what()), 0};
             }
         });
 

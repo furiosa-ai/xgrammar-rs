@@ -248,3 +248,42 @@ fn test_compile_structural_tag_error() {
     // Verify that error message contains key information
     assert!(err_msg.contains("Failed to parse JSON: syntax error at line 1 near: invalid json"));
 }
+
+/// Round-trip CompiledGrammar through serialize_json / deserialize_json and
+/// drive the restored grammar through a matcher.
+#[test]
+fn test_compiled_grammar_serialize_roundtrip() {
+    use xgrammar::{CompiledGrammar, GrammarMatcher};
+
+    let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
+        .expect("Failed to load tokenizer info");
+    let compiler = GrammarCompiler::new(&tok_info);
+    let compiled =
+        compiler.compile_builtin_json_grammar().expect("Failed to compile builtin JSON grammar");
+
+    let json = compiled.serialize_json();
+    assert!(!json.is_empty());
+
+    let restored = CompiledGrammar::deserialize_json(&json, &tok_info)
+        .expect("deserialization should succeed");
+    assert!(restored.memory_size_bytes() > 0);
+
+    let mut matcher = GrammarMatcher::new(&restored);
+    assert!(matcher.accept_string("{\"a\":1}", None));
+    assert!(matcher.is_terminated());
+}
+
+#[test]
+fn test_compiled_grammar_deserialize_error() {
+    use xgrammar::CompiledGrammar;
+
+    let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
+        .expect("Failed to load tokenizer info");
+
+    let Err(XGrammarErr::InvalidJson(err_msg)) =
+        CompiledGrammar::deserialize_json("garbage", &tok_info)
+    else {
+        panic!("Expected InvalidJson");
+    };
+    assert!(err_msg.contains("Invalid JSON error"), "unexpected message: {err_msg}");
+}
