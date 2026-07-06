@@ -33,6 +33,10 @@ pub enum XGrammarErr {
     /// An untyped xgrammar error raised by a matcher operation.
     #[error("{0}")]
     MatcherError(String),
+    /// An untyped xgrammar error raised while deserializing a
+    /// `TokenizerInfo`.
+    #[error("{0}")]
+    TokenizerInfoError(String),
     // The five variants below correspond one-to-one to the upstream
     // `xgrammar::XGrammarError` subclasses
     // (thirdparty/xgrammar/include/xgrammar/exception.h), mapped via

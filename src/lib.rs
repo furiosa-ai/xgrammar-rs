@@ -40,7 +40,7 @@ mod error;
 pub mod huggingface_hub;
 
 use std::collections::HashMap;
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use std::path::Path;
 use std::str::FromStr;
 
@@ -71,9 +71,9 @@ cpp! {{
         bool add_prefix_space;
     };
 
-    // Discriminants for the xgrammar::XGrammarError subclasses, derived from
-    // XGrammarError::GetType(). Keep the numeric values in sync with the Rust
-    // `CppErrorKind` enum defined alongside the result-struct mirrors.
+    // Discriminants for the xgrammar::XGrammarError subclasses. Keep the
+    // numeric values in sync with the match in the Rust `error_from_kind`
+    // function (defined alongside the result-struct mirrors).
     enum XGErrorKind : int32_t {
         kXGOtherError = 0,
         kXGDeserializeVersionError = 1,
@@ -83,13 +83,27 @@ cpp! {{
         kXGInvalidStructuralTagError = 5,
     };
 
-    static int32_t xgr_error_kind(const xgrammar::XGrammarError& e) {
-        const std::string t = e.GetType();
-        if (t == "DeserializeVersionError") return kXGDeserializeVersionError;
-        if (t == "InvalidJSONError") return kXGInvalidJSONError;
-        if (t == "DeserializeFormatError") return kXGDeserializeFormatError;
-        if (t == "InvalidJSONSchemaError") return kXGInvalidJSONSchemaError;
-        if (t == "InvalidStructuralTagError") return kXGInvalidStructuralTagError;
+    // Classify any exception into an XGErrorKind. dynamic_cast (rather than
+    // comparing XGrammarError::GetType() strings) so that an upstream class
+    // rename breaks compilation loudly instead of silently degrading every
+    // typed error to kXGOtherError. Taking std::exception lets a single
+    // catch clause handle both typed and untyped errors.
+    static int32_t xgr_error_kind(const std::exception& e) {
+        if (dynamic_cast<const xgrammar::DeserializeVersionError*>(&e)) {
+            return kXGDeserializeVersionError;
+        }
+        if (dynamic_cast<const xgrammar::InvalidJSONError*>(&e)) {
+            return kXGInvalidJSONError;
+        }
+        if (dynamic_cast<const xgrammar::DeserializeFormatError*>(&e)) {
+            return kXGDeserializeFormatError;
+        }
+        if (dynamic_cast<const xgrammar::InvalidJSONSchemaError*>(&e)) {
+            return kXGInvalidJSONSchemaError;
+        }
+        if (dynamic_cast<const xgrammar::InvalidStructuralTagError*>(&e)) {
+            return kXGInvalidStructuralTagError;
+        }
         return kXGOtherError;
     }
 
@@ -178,11 +192,17 @@ pub struct MetadataFromHF {
 /// Helper function to safely extract and free C++ error message.
 ///
 /// # Safety
-/// The error_message_ptr must be a valid C string pointer allocated with strdup
-/// and must not be null.
+/// The error_message_ptr must be null or a valid C string pointer allocated
+/// with strdup.
 unsafe fn extract_and_free_error_message(error_message_ptr: *mut std::os::raw::c_char) -> String {
+    // Every failure path fills the pointer with strdup(), which returns NULL
+    // when allocation fails — degrade to a placeholder instead of passing
+    // NULL to CStr::from_ptr.
+    if error_message_ptr.is_null() {
+        return "<error message unavailable: allocation failure>".to_string();
+    }
     // SAFETY: The caller guarantees that error_message_ptr is a valid C string
-    // allocated with strdup and is not null
+    // allocated with strdup; the null case is handled above.
     unsafe {
         let msg = CStr::from_ptr(error_message_ptr).to_string_lossy().into_owned();
         libc::free(error_message_ptr as *mut libc::c_void);
@@ -205,6 +225,78 @@ unsafe fn extract_and_free_error_message(error_message_ptr: *mut std::os::raw::c
 unsafe fn assign_utf8_lossy(out: *mut String, data: *const u8, len: usize) {
     let slice = unsafe { std::slice::from_raw_parts(data, len) };
     unsafe { *out = String::from_utf8_lossy(slice).into_owned() };
+}
+
+/// Ensure a DLPack tensor is row-major contiguous before handing it to
+/// xgrammar, which indexes `data` as a compact row-major array and ignores
+/// `DLTensor::strides` entirely. A permuted or sliced layout would be read
+/// and written at wrong offsets (silently corrupting results), and a
+/// negative stride would place accesses outside the buffer.
+fn ensure_row_major_contiguous(tensor: &DLTensor, name: &str) -> Result<()> {
+    if tensor.memory_order() == dlpark::utils::MemoryOrder::RowMajorContiguous {
+        return Ok(());
+    }
+    Err(XGrammarErr::MatcherError(format!(
+        "The {} tensor must be row-major contiguous: xgrammar ignores DLTensor strides \
+         (shape {:?}, strides {:?})",
+        name,
+        tensor.shape(),
+        tensor.strides(),
+    )))
+}
+
+/// View a DLPack tensor as an `i64` slice when it is a contiguous 1-D int64
+/// CPU tensor; `None` otherwise (the C++ side then reports its own
+/// validation error for the malformed tensor). The device check is
+/// load-bearing: a non-CPU data pointer must not be dereferenced on the
+/// host.
+fn as_cpu_i64_slice(tensor: &DLTensor) -> Option<&[i64]> {
+    let dtype = tensor.data_type();
+    if tensor.dl_tensor().device.device_type != dlpark::ffi::DeviceType::Cpu
+        || tensor.num_dimensions() != 1
+        || dtype.code != dlpark::ffi::DataTypeCode::Int
+        || dtype.bits != 64
+        || dtype.lanes != 1
+    {
+        return None;
+    }
+    tensor.as_slice_contiguous::<i64>().ok()
+}
+
+/// Validate a draft-tree encoding before handing the tensors to xgrammar:
+/// upstream `TraverseDraftTree` follows `retrieve_next_token` /
+/// `retrieve_next_sibling` indices without any bounds or cycle check, so an
+/// out-of-range link would corrupt memory and a cycle would recurse forever.
+/// Every link must stay in `[-1, N)` and each node may be reached at most
+/// once (the encoding must be a tree).
+fn validate_draft_tree(next_token: &[i64], next_sibling: &[i64]) -> Result<()> {
+    let n = next_token.len();
+    if n == 0 {
+        return Ok(()); // The C++ side rejects empty tensors itself.
+    }
+    let mut visited = vec![false; n];
+    let mut stack = vec![0usize];
+    while let Some(node) = stack.pop() {
+        if visited[node] {
+            return Err(XGrammarErr::MatcherError(format!(
+                "Invalid draft tree: node {node} is reachable more than once \
+                 (the encoding must be an acyclic tree)"
+            )));
+        }
+        visited[node] = true;
+        for link in [next_token[node], next_sibling[node]] {
+            if link == -1 {
+                continue;
+            }
+            if link < 0 || link >= n as i64 {
+                return Err(XGrammarErr::MatcherError(format!(
+                    "Invalid draft tree: node {node} links to index {link}, outside [-1, {n})"
+                )));
+            }
+            stack.push(link as usize);
+        }
+    }
+    Ok(())
 }
 
 /// Map a C++ `XGErrorKind` discriminant + message to a precise
@@ -382,7 +474,7 @@ impl From<TokenizerInfoResult> for Result<TokenizerInfo> {
         } else {
             // SAFETY: error_message is valid and we're taking ownership
             let error_msg = unsafe { extract_and_free_error_message(result.error_message) };
-            Err(error_from_kind(result.error_kind, error_msg, XGrammarErr::InvalidTokenizerConfig))
+            Err(error_from_kind(result.error_kind, error_msg, XGrammarErr::TokenizerInfoError))
         }
     }
 }
@@ -423,7 +515,7 @@ impl TokenizerInfo {
             );
         }
         let final_vocab_size = vocab_size.unwrap_or(tokenizer_vocab_size);
-        let tokenizer_metadata = Self::detect_metadata_from_hf(backend_str);
+        let tokenizer_metadata = Self::detect_metadata_from_hf(backend_str)?;
         let vocab_type = tokenizer_metadata.vocab_type;
         let add_prefix_space = tokenizer_metadata.add_prefix_space;
 
@@ -508,8 +600,11 @@ impl TokenizerInfo {
         stop_token_ids: Vec<i32>,
         add_prefix_space: bool,
     ) -> self::Result<Self> {
-        // Ensure the vocab size is at least as large as the max id in the vocab map
-        let mut encoded_vocab = vec![CString::new("").unwrap(); vocab_size];
+        // Ensure the vocab size is at least as large as the max id in the vocab map.
+        // Marshal each token as pointer + length (not CString): tokens are
+        // arbitrary byte sequences and may legally contain NUL bytes, which
+        // upstream's std::vector<std::string> preserves.
+        let mut encoded_vocab: Vec<&str> = vec![""; vocab_size];
 
         // Fill the encoded_vocab with tokens from the vocab_map
         for (token, idx) in vocab_map.iter() {
@@ -519,18 +614,20 @@ impl TokenizerInfo {
                 idx,
                 vocab_size
             );
-            encoded_vocab[*idx as usize] =
-                CString::new(token.as_str()).expect("fail to convert a token to CString");
+            encoded_vocab[*idx as usize] = token.as_str();
         }
 
-        let encoded_vocab_ptr: Vec<_> = encoded_vocab.iter().map(|s| s.as_ptr()).collect();
-        let encoded_vocab_ptr_ptr = encoded_vocab_ptr.as_ptr();
+        let token_ptrs: Vec<*const u8> = encoded_vocab.iter().map(|s| s.as_ptr()).collect();
+        let token_lens: Vec<usize> = encoded_vocab.iter().map(|s| s.len()).collect();
+        let token_ptrs_ptr = token_ptrs.as_ptr();
+        let token_lens_ptr = token_lens.as_ptr();
         let vocab_size_i32 = vocab_size as i32;
         let stop_token_ids_ptr = stop_token_ids.as_ptr();
         let stop_token_ids_len = stop_token_ids.len();
 
         Ok(cpp!(unsafe [
-            encoded_vocab_ptr_ptr as "const char* const*",
+            token_ptrs_ptr as "const uint8_t* const*",
+            token_lens_ptr as "const size_t*",
             vocab_type as "xgrammar::VocabType",
             vocab_size_i32 as "int",
             stop_token_ids_ptr as "const int32_t*",
@@ -538,8 +635,11 @@ impl TokenizerInfo {
             add_prefix_space as "bool"
         ] -> TokenizerInfo as "xgrammar::TokenizerInfo" {
             std::vector<std::string> encoded_vocab;
+            encoded_vocab.reserve(vocab_size_i32);
             for (int i = 0; i < vocab_size_i32; ++i) {
-                encoded_vocab.push_back(std::string(encoded_vocab_ptr_ptr[i]));
+                encoded_vocab.emplace_back(
+                    reinterpret_cast<const char*>(token_ptrs_ptr[i]), token_lens_ptr[i]
+                );
             }
             std::vector<int32_t> stop_token_ids(stop_token_ids_ptr, stop_token_ids_ptr + stop_token_ids_len);
 
@@ -656,6 +756,9 @@ impl TokenizerInfo {
     /// * [`XGrammarErr::InvalidJson`] if the input is not valid JSON
     /// * [`XGrammarErr::DeserializeFormat`] if the JSON does not have the
     ///   expected structure
+    /// * [`XGrammarErr::TokenizerInfoError`] if an untyped xgrammar error is
+    ///   raised while reconstructing the tokenizer info (e.g. valid JSON that
+    ///   is not an object)
     pub fn deserialize_json(json: &str) -> Result<Self> {
         // Pointer + length marshaling — see Grammar::deserialize_json for the
         // rationale.
@@ -679,36 +782,56 @@ impl TokenizerInfo {
                     );
                     return {false, TokenizerInfo(NullObj()), error_message, error_kind};
                 }
-            } catch (const xgrammar::XGrammarError& e) {
-                return {false, TokenizerInfo(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, TokenizerInfo(NullObj()), strdup(e.what()), 0};
+                return {false, TokenizerInfo(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             }
         });
 
         result.into()
     }
 
-    fn detect_metadata_from_hf(backend_str: &str) -> MetadataFromHF {
-        let backend_str =
-            CString::new(backend_str).expect("Failed to convert backend_str to CString");
+    fn detect_metadata_from_hf(backend_str: &str) -> Result<MetadataFromHF> {
         let backend_str_ptr = backend_str.as_ptr();
+        let backend_str_len = backend_str.len();
+        // Error out-parameter: set to a strdup'd message when the C++ side
+        // fails. C++ exceptions must not cross the FFI boundary, so the
+        // closure catches everything and reports through this channel.
+        let mut error_message: *mut std::os::raw::c_char = std::ptr::null_mut();
+        let error_message_out = &mut error_message as *mut *mut std::os::raw::c_char;
 
-        cpp!(unsafe [backend_str_ptr as "const char*"] -> MetadataFromHF as "MetadataFromHF" {
-            const std::string &backend_str(backend_str_ptr);
-            std::string metadata_str = TokenizerInfo::DetectMetadataFromHF(backend_str);
-            picojson::value v;
-            std::string err = picojson::parse(v, metadata_str);
-            if (!err.empty()) {
-                throw std::runtime_error("Failed to parse metadata: " + err);
+        let metadata = cpp!(unsafe [
+            backend_str_ptr as "const uint8_t*",
+            backend_str_len as "size_t",
+            error_message_out as "char**"
+        ] -> MetadataFromHF as "MetadataFromHF" {
+            try {
+                std::string backend_str(
+                    reinterpret_cast<const char*>(backend_str_ptr), backend_str_len
+                );
+                std::string metadata_str = TokenizerInfo::DetectMetadataFromHF(backend_str);
+                picojson::value v;
+                std::string err = picojson::parse(v, metadata_str);
+                if (!err.empty()) {
+                    throw std::runtime_error("Failed to parse metadata: " + err);
+                }
+                const picojson::object& metadata = v.get<picojson::object>();
+
+                MetadataFromHF metadata_from_hf;
+                metadata_from_hf.vocab_type = static_cast<xgrammar::VocabType>(metadata["vocab_type"].get<double>());
+                metadata_from_hf.add_prefix_space = metadata["add_prefix_space"].get<bool>();
+                return metadata_from_hf;
+            } catch (const std::exception& e) {
+                *error_message_out = strdup(e.what());
+                return MetadataFromHF{VocabType::RAW, false};
             }
-            const picojson::object& metadata = v.get<picojson::object>();
+        });
 
-            MetadataFromHF metadata_from_hf;
-            metadata_from_hf.vocab_type = static_cast<xgrammar::VocabType>(metadata["vocab_type"].get<double>());
-            metadata_from_hf.add_prefix_space = metadata["add_prefix_space"].get<bool>();
-            return metadata_from_hf;
-        })
+        if !error_message.is_null() {
+            // SAFETY: non-null means the C++ side just strdup'd it.
+            let msg = unsafe { extract_and_free_error_message(error_message) };
+            return Err(XGrammarErr::TokenizerParseFailed(msg));
+        }
+        Ok(metadata)
     }
 }
 
@@ -735,9 +858,11 @@ impl CompiledGrammar {
 
     /// Serialize the compiled grammar to a JSON string.
     ///
-    /// The output contains the grammar and the precomputed token masks, but
-    /// **not** the tokenizer info — the same tokenizer info must be supplied
-    /// again to [`Self::deserialize_json`]. It is version-locked like
+    /// The output contains the grammar, the precomputed token masks, and a
+    /// tokenizer-metadata fingerprint (vocab type/size, `add_prefix_space`,
+    /// stop token ids) — but not the full tokenizer info, so the same
+    /// tokenizer info must be supplied again to [`Self::deserialize_json`],
+    /// which validates it against the fingerprint. It is version-locked like
     /// [`Grammar::serialize_json`].
     pub fn serialize_json(&self) -> String {
         let mut out = String::new();
@@ -765,14 +890,23 @@ impl CompiledGrammar {
     /// # Arguments
     /// * `json` - The serialized compiled grammar
     /// * `tokenizer_info` - The tokenizer info the grammar was compiled
-    ///   against (not part of the serialized data)
+    ///   against. The serialized data embeds a metadata fingerprint of the
+    ///   original tokenizer, and deserialization fails if the supplied
+    ///   tokenizer info does not match it.
     ///
     /// # Errors
     /// * [`XGrammarErr::DeserializeVersion`] if the data was serialized by an
     ///   incompatible xgrammar serialization version
     /// * [`XGrammarErr::InvalidJson`] if the input is not valid JSON
     /// * [`XGrammarErr::DeserializeFormat`] if the JSON does not have the
-    ///   expected structure
+    ///   expected structure, or if `tokenizer_info` does not match the
+    ///   embedded tokenizer metadata (`"Tokenizer metadata mismatch: ..."`)
+    /// * [`XGrammarErr::CompilationError`] if an untyped xgrammar error is
+    ///   raised while reconstructing the compiled grammar
+    ///
+    /// Note: the vendored xgrammar ignores failures while deserializing the
+    /// embedded `adaptive_token_mask_cache` payload, so a corrupted mask
+    /// cache may still deserialize without an error.
     pub fn deserialize_json(json: &str, tokenizer_info: &TokenizerInfo) -> Result<Self> {
         // Pointer + length marshaling — see Grammar::deserialize_json for the
         // rationale.
@@ -797,14 +931,25 @@ impl CompiledGrammar {
                     );
                     return {false, CompiledGrammar(NullObj()), error_message, error_kind};
                 }
-            } catch (const xgrammar::XGrammarError& e) {
-                return {false, CompiledGrammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, CompiledGrammar(NullObj()), strdup(e.what()), 0};
+                return {false, CompiledGrammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             }
         });
 
-        result.into()
+        let compiled = Result::<Self>::from(result)?;
+        // The vendored xgrammar ignores the error returned while
+        // deserializing the "grammar" field (see DeserializeJSONValue in
+        // thirdparty/xgrammar/cpp/compiled_grammar.cc), which leaves the
+        // field as a null grammar and would otherwise surface much later as
+        // a crash inside the matcher. Detect that tell-tale state here.
+        if compiled.get_grammar().is_null() {
+            return Err(XGrammarErr::DeserializeFormat(
+                "Deserialize error for type CompiledGrammar: the 'grammar' field failed to \
+                 deserialize"
+                    .to_string(),
+            ));
+        }
+        Ok(compiled)
     }
 }
 
@@ -897,10 +1042,8 @@ impl GrammarCompiler {
             try {
                 auto compiled = self->CompileGrammar(*grammar);
                 return {true, compiled, nullptr, 0};
-            } catch (const xgrammar::XGrammarError& e) {
-                return {false, CompiledGrammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, CompiledGrammar(NullObj()), strdup(e.what()), 0};
+                return {false, CompiledGrammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             }
         });
 
@@ -933,10 +1076,8 @@ impl GrammarCompiler {
             try {
                 auto compiled = self->CompileBuiltinJSONGrammar();
                 return {true, compiled, nullptr, 0};
-            } catch (const xgrammar::XGrammarError& e) {
-                return {false, CompiledGrammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, CompiledGrammar(NullObj()), strdup(e.what()), 0};
+                return {false, CompiledGrammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             }
         });
 
@@ -983,8 +1124,8 @@ impl GrammarCompiler {
         strict_mode: Option<bool>,
         max_whitespace_cnt: Option<i32>,
     ) -> Result<CompiledGrammar> {
-        let schema_cstring = CString::new(schema).expect("Failed to convert schema to CString");
-        let schema_ptr = schema_cstring.as_ptr();
+        let schema_ptr = schema.as_ptr();
+        let schema_len = schema.len();
         let any_whitespace = any_whitespace.unwrap_or(true);
         let strict_mode = strict_mode.unwrap_or(true);
         let has_indent = indent.is_some();
@@ -993,39 +1134,42 @@ impl GrammarCompiler {
         let has_max_whitespace_cnt = max_whitespace_cnt.is_some();
         let max_whitespace_cnt_value = max_whitespace_cnt.unwrap_or(0);
 
-        let (_obj_sep_cstring, _array_sep_cstring, obj_sep_ptr, array_sep_ptr) =
-            if let Some((obj_sep, array_sep)) = separators {
-                let obj_sep_cstring =
-                    CString::new(obj_sep).expect("Failed to convert object separator to CString");
-                let array_sep_cstring =
-                    CString::new(array_sep).expect("Failed to convert array separator to CString");
-                let obj_sep_ptr = obj_sep_cstring.as_ptr();
-                let array_sep_ptr = array_sep_cstring.as_ptr();
-                (Some(obj_sep_cstring), Some(array_sep_cstring), obj_sep_ptr, array_sep_ptr)
-            } else {
-                (None, None, std::ptr::null(), std::ptr::null())
-            };
+        // `separators` stays alive for the whole call, so borrowing is fine.
+        let (obj_sep, array_sep) = match &separators {
+            Some((obj_sep, array_sep)) => (obj_sep.as_str(), array_sep.as_str()),
+            None => ("", ""),
+        };
+        let obj_sep_ptr = obj_sep.as_ptr();
+        let obj_sep_len = obj_sep.len();
+        let array_sep_ptr = array_sep.as_ptr();
+        let array_sep_len = array_sep.len();
 
         let result = cpp!(unsafe [
             self as "xgrammar::GrammarCompiler*",
-            schema_ptr as "const char*",
+            schema_ptr as "const uint8_t*",
+            schema_len as "size_t",
             any_whitespace as "bool",
             has_indent as "bool",
             indent_value as "int",
             has_separators as "bool",
-            obj_sep_ptr as "const char*",
-            array_sep_ptr as "const char*",
+            obj_sep_ptr as "const uint8_t*",
+            obj_sep_len as "size_t",
+            array_sep_ptr as "const uint8_t*",
+            array_sep_len as "size_t",
             strict_mode as "bool",
             has_max_whitespace_cnt as "bool",
             max_whitespace_cnt_value as "int"
         ] -> CompiledGrammarResult as "CompiledGrammarResult" {
             try {
-                std::string schema_str(schema_ptr);
+                std::string schema_str(reinterpret_cast<const char*>(schema_ptr), schema_len);
                 std::optional<int> opt_indent = has_indent ? std::make_optional(indent_value) : std::nullopt;
                 std::optional<std::pair<std::string, std::string>> opt_separators;
 
                 if (has_separators) {
-                    opt_separators = std::make_pair(std::string(obj_sep_ptr), std::string(array_sep_ptr));
+                    opt_separators = std::make_pair(
+                        std::string(reinterpret_cast<const char*>(obj_sep_ptr), obj_sep_len),
+                        std::string(reinterpret_cast<const char*>(array_sep_ptr), array_sep_len)
+                    );
                 } else {
                     opt_separators = std::nullopt;
                 }
@@ -1034,10 +1178,8 @@ impl GrammarCompiler {
 
                 auto compiled = self->CompileJSONSchema(schema_str, any_whitespace, opt_indent, opt_separators, strict_mode, opt_max_whitespace_cnt);
                 return {true, compiled, nullptr, 0};
-            } catch (const xgrammar::XGrammarError& e) {
-                return {false, CompiledGrammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, CompiledGrammar(NullObj()), strdup(e.what()), 0};
+                return {false, CompiledGrammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             }
         });
 
@@ -1070,21 +1212,20 @@ impl GrammarCompiler {
     /// # }
     /// ```
     pub fn compile_regex(&self, regex: &str) -> Result<CompiledGrammar> {
-        let regex_cstring = CString::new(regex).expect("Failed to convert regex to CString");
-        let regex_ptr = regex_cstring.as_ptr();
+        let regex_ptr = regex.as_ptr();
+        let regex_len = regex.len();
 
         let result = cpp!(unsafe [
             self as "xgrammar::GrammarCompiler*",
-            regex_ptr as "const char*"
+            regex_ptr as "const uint8_t*",
+            regex_len as "size_t"
         ] -> CompiledGrammarResult as "CompiledGrammarResult" {
             try {
-                std::string regex_str(regex_ptr);
+                std::string regex_str(reinterpret_cast<const char*>(regex_ptr), regex_len);
                 auto compiled = self->CompileRegex(regex_str);
                 return {true, compiled, nullptr, 0};
-            } catch (const xgrammar::XGrammarError& e) {
-                return {false, CompiledGrammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, CompiledGrammar(NullObj()), strdup(e.what()), 0};
+                return {false, CompiledGrammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             }
         });
 
@@ -1148,22 +1289,23 @@ impl GrammarCompiler {
     /// # }
     /// ```
     pub fn compile_structural_tag(&self, structural_tag_json: &str) -> Result<CompiledGrammar> {
-        let structural_tag_json_cstring = CString::new(structural_tag_json)
-            .expect("Failed to convert structural_tag_json to CString");
-        let structural_tag_json_ptr = structural_tag_json_cstring.as_ptr();
+        let structural_tag_json_ptr = structural_tag_json.as_ptr();
+        let structural_tag_json_len = structural_tag_json.len();
 
         let result = cpp!(unsafe [
             self as "xgrammar::GrammarCompiler*",
-            structural_tag_json_ptr as "const char*"
+            structural_tag_json_ptr as "const uint8_t*",
+            structural_tag_json_len as "size_t"
         ] -> CompiledGrammarResult as "CompiledGrammarResult" {
             try {
-                std::string structural_tag_json_str(structural_tag_json_ptr);
+                std::string structural_tag_json_str(
+                    reinterpret_cast<const char*>(structural_tag_json_ptr),
+                    structural_tag_json_len
+                );
                 auto compiled = self->CompileStructuralTag(structural_tag_json_str);
                 return {true, compiled, nullptr, 0};
-            } catch (const xgrammar::XGrammarError& e) {
-                return {false, CompiledGrammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, CompiledGrammar(NullObj()), strdup(e.what()), 0};
+                return {false, CompiledGrammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             }
         });
 
@@ -1225,25 +1367,26 @@ impl Grammar {
     /// assert!(Grammar::from_ebnf(invalid_ebnf, Some("root")).is_err());
     /// ```
     pub fn from_ebnf(ebnf_string: &str, root_rule_name: Option<&str>) -> Result<Self> {
-        let ebnf_string_cstring =
-            CString::new(ebnf_string).expect("Failed to convert ebnf_string to CString");
-        let ebnf_string_ptr = ebnf_string_cstring.as_ptr();
+        let ebnf_string_ptr = ebnf_string.as_ptr();
+        let ebnf_string_len = ebnf_string.len();
         let root_rule_name = root_rule_name.unwrap_or("root");
-        let root_rule_name_cstring =
-            CString::new(root_rule_name).expect("Failed to convert root_rule_name to CString");
-        let root_rule_name_ptr = root_rule_name_cstring.as_ptr();
+        let root_rule_name_ptr = root_rule_name.as_ptr();
+        let root_rule_name_len = root_rule_name.len();
 
         let result = cpp!(unsafe [
-            ebnf_string_ptr as "const char*",
-            root_rule_name_ptr as "const char*"
+            ebnf_string_ptr as "const uint8_t*",
+            ebnf_string_len as "size_t",
+            root_rule_name_ptr as "const uint8_t*",
+            root_rule_name_len as "size_t"
         ] -> GrammarResult as "GrammarResult" {
             try {
-                auto grammar = Grammar::FromEBNF(string(ebnf_string_ptr), string(root_rule_name_ptr));
+                auto grammar = Grammar::FromEBNF(
+                    string(reinterpret_cast<const char*>(ebnf_string_ptr), ebnf_string_len),
+                    string(reinterpret_cast<const char*>(root_rule_name_ptr), root_rule_name_len)
+                );
                 return {true, grammar, nullptr, 0};
-            } catch (const xgrammar::XGrammarError& e) {
-                return {false, Grammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, Grammar(NullObj()), strdup(e.what()), 0};
+                return {false, Grammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             }
         });
 
@@ -1313,8 +1456,8 @@ impl Grammar {
         max_whitespace_cnt: Option<i32>,
         print_converted_ebnf: Option<bool>,
     ) -> Result<Self> {
-        let schema_cstring = CString::new(schema).expect("Failed to convert schema to CString");
-        let schema_ptr = schema_cstring.as_ptr();
+        let schema_ptr = schema.as_ptr();
+        let schema_len = schema.len();
         let any_whitespace = any_whitespace.unwrap_or(true);
         let strict_mode = strict_mode.unwrap_or(true);
         let print_converted_ebnf = print_converted_ebnf.unwrap_or(false);
@@ -1324,39 +1467,42 @@ impl Grammar {
         let has_max_whitespace_cnt = max_whitespace_cnt.is_some();
         let max_whitespace_cnt_value = max_whitespace_cnt.unwrap_or(0);
 
-        let (_obj_sep_cstring, _array_sep_cstring, obj_sep_ptr, array_sep_ptr) =
-            if let Some((obj_sep, array_sep)) = separators {
-                let obj_sep_cstring =
-                    CString::new(obj_sep).expect("Failed to convert object separator to CString");
-                let array_sep_cstring =
-                    CString::new(array_sep).expect("Failed to convert array separator to CString");
-                let obj_sep_ptr = obj_sep_cstring.as_ptr();
-                let array_sep_ptr = array_sep_cstring.as_ptr();
-                (Some(obj_sep_cstring), Some(array_sep_cstring), obj_sep_ptr, array_sep_ptr)
-            } else {
-                (None, None, std::ptr::null(), std::ptr::null())
-            };
+        // `separators` stays alive for the whole call, so borrowing is fine.
+        let (obj_sep, array_sep) = match &separators {
+            Some((obj_sep, array_sep)) => (obj_sep.as_str(), array_sep.as_str()),
+            None => ("", ""),
+        };
+        let obj_sep_ptr = obj_sep.as_ptr();
+        let obj_sep_len = obj_sep.len();
+        let array_sep_ptr = array_sep.as_ptr();
+        let array_sep_len = array_sep.len();
 
         let result = cpp!(unsafe [
-            schema_ptr as "const char*",
+            schema_ptr as "const uint8_t*",
+            schema_len as "size_t",
             any_whitespace as "bool",
             has_indent as "bool",
             indent_value as "int",
             has_separators as "bool",
-            obj_sep_ptr as "const char*",
-            array_sep_ptr as "const char*",
+            obj_sep_ptr as "const uint8_t*",
+            obj_sep_len as "size_t",
+            array_sep_ptr as "const uint8_t*",
+            array_sep_len as "size_t",
             strict_mode as "bool",
             has_max_whitespace_cnt as "bool",
             max_whitespace_cnt_value as "int",
             print_converted_ebnf as "bool"
         ] -> GrammarResult as "GrammarResult" {
             try {
-                std::string schema_str(schema_ptr);
+                std::string schema_str(reinterpret_cast<const char*>(schema_ptr), schema_len);
                 std::optional<int> opt_indent = has_indent ? std::make_optional(indent_value) : std::nullopt;
                 std::optional<std::pair<std::string, std::string>> opt_separators;
 
                 if (has_separators) {
-                    opt_separators = std::make_pair(std::string(obj_sep_ptr), std::string(array_sep_ptr));
+                    opt_separators = std::make_pair(
+                        std::string(reinterpret_cast<const char*>(obj_sep_ptr), obj_sep_len),
+                        std::string(reinterpret_cast<const char*>(array_sep_ptr), array_sep_len)
+                    );
                 } else {
                     opt_separators = std::nullopt;
                 }
@@ -1373,10 +1519,8 @@ impl Grammar {
                     print_converted_ebnf
                 );
                 return {true, grammar, nullptr, 0};
-            } catch (const xgrammar::XGrammarError& e) {
-                return {false, Grammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, Grammar(NullObj()), strdup(e.what()), 0};
+                return {false, Grammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             }
         });
 
@@ -1413,21 +1557,23 @@ impl Grammar {
     /// assert!(Grammar::from_regex(invalid_regex, Some(false)).is_err());
     /// ```
     pub fn from_regex(regex: &str, print_converted_ebnf: Option<bool>) -> Result<Self> {
-        let regex_cstring = CString::new(regex).expect("Failed to convert regex to CString");
-        let regex_ptr = regex_cstring.as_ptr();
+        let regex_ptr = regex.as_ptr();
+        let regex_len = regex.len();
         let print_converted_ebnf = print_converted_ebnf.unwrap_or(false);
 
         let result = cpp!(unsafe [
-            regex_ptr as "const char*",
+            regex_ptr as "const uint8_t*",
+            regex_len as "size_t",
             print_converted_ebnf as "bool"
         ] -> GrammarResult as "GrammarResult" {
             try {
-                auto grammar = Grammar::FromRegex(string(regex_ptr), print_converted_ebnf);
+                auto grammar = Grammar::FromRegex(
+                    string(reinterpret_cast<const char*>(regex_ptr), regex_len),
+                    print_converted_ebnf
+                );
                 return {true, grammar, nullptr, 0};
-            } catch (const xgrammar::XGrammarError& e) {
-                return {false, Grammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, Grammar(NullObj()), strdup(e.what()), 0};
+                return {false, Grammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             }
         });
 
@@ -1462,7 +1608,10 @@ impl Grammar {
     /// # Errors
     /// * [`XGrammarErr::InvalidJson`] if the input is not valid JSON
     /// * [`XGrammarErr::InvalidStructuralTag`] if the structural tag specification is invalid
-    /// * [`XGrammarErr::InvalidJsonSchema`] if an embedded JSON schema is invalid
+    /// * [`XGrammarErr::InvalidGrammar`] if converting an embedded sub-grammar
+    ///   fails (e.g. an invalid `regex` pattern, `grammar` EBNF, or
+    ///   `json_schema`) — upstream raises these as untyped errors, not typed
+    ///   `XGrammarError`s
     ///
     /// # Example
     /// ```
@@ -1501,34 +1650,44 @@ impl Grammar {
         structural_tag_json: &str,
         tokenizer_info: Option<&TokenizerInfo>,
     ) -> Result<Self> {
-        let structural_tag_json_cstring = CString::new(structural_tag_json)
-            .expect("Failed to convert structural_tag_json to CString");
-        let structural_tag_json_ptr = structural_tag_json_cstring.as_ptr();
+        let structural_tag_json_ptr = structural_tag_json.as_ptr();
+        let structural_tag_json_len = structural_tag_json.len();
         let tokenizer_info_ptr: *const TokenizerInfo =
             tokenizer_info.map(|t| t as *const TokenizerInfo).unwrap_or(std::ptr::null());
 
         let result = cpp!(unsafe [
-            structural_tag_json_ptr as "const char*",
+            structural_tag_json_ptr as "const uint8_t*",
+            structural_tag_json_len as "size_t",
             tokenizer_info_ptr as "const xgrammar::TokenizerInfo*"
         ] -> GrammarResult as "GrammarResult" {
-            std::string structural_tag_json_str(structural_tag_json_ptr);
-            std::optional<xgrammar::TokenizerInfo> opt_tokenizer_info;
-            if (tokenizer_info_ptr != nullptr) {
-                opt_tokenizer_info = *tokenizer_info_ptr;
-            }
-            auto result = xgrammar::Grammar::FromStructuralTag(
-                structural_tag_json_str, opt_tokenizer_info
-            );
-
-            // Check if result holds a Grammar or an error
-            if (std::holds_alternative<xgrammar::Grammar>(result)) {
-                return {true, std::get<xgrammar::Grammar>(result), nullptr, 0};
-            } else {
-                int32_t error_kind = kXGOtherError;
-                char* error_message = xgr_dup_variant_error(
-                    std::get<xgrammar::StructuralTagError>(result), &error_kind
+            try {
+                std::string structural_tag_json_str(
+                    reinterpret_cast<const char*>(structural_tag_json_ptr),
+                    structural_tag_json_len
                 );
-                return {false, Grammar(NullObj()), error_message, error_kind};
+                std::optional<xgrammar::TokenizerInfo> opt_tokenizer_info;
+                if (tokenizer_info_ptr != nullptr) {
+                    opt_tokenizer_info = *tokenizer_info_ptr;
+                }
+                auto result = xgrammar::Grammar::FromStructuralTag(
+                    structural_tag_json_str, opt_tokenizer_info
+                );
+
+                // Check if result holds a Grammar or an error
+                if (std::holds_alternative<xgrammar::Grammar>(result)) {
+                    return {true, std::get<xgrammar::Grammar>(result), nullptr, 0};
+                } else {
+                    int32_t error_kind = kXGOtherError;
+                    char* error_message = xgr_dup_variant_error(
+                        std::get<xgrammar::StructuralTagError>(result), &error_kind
+                    );
+                    return {false, Grammar(NullObj()), error_message, error_kind};
+                }
+            } catch (const std::exception& e) {
+                // Converting an embedded sub-grammar (regex/EBNF/JSON schema)
+                // throws untyped errors instead of returning the variant; the
+                // exception must not cross the FFI boundary.
+                return {false, Grammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             }
         });
 
@@ -1694,6 +1853,9 @@ impl Grammar {
     /// * [`XGrammarErr::InvalidJson`] if the input is not valid JSON
     /// * [`XGrammarErr::DeserializeFormat`] if the JSON does not have the
     ///   expected structure
+    /// * [`XGrammarErr::InvalidGrammar`] if an untyped xgrammar error is
+    ///   raised while reconstructing the grammar (e.g. valid JSON that is not
+    ///   an object)
     pub fn deserialize_json(json: &str) -> Result<Self> {
         // Marshal as pointer + length (not CString): the input is untrusted,
         // and an interior NUL byte must surface as a deserialization error
@@ -1718,10 +1880,8 @@ impl Grammar {
                     );
                     return {false, Grammar(NullObj()), error_message, error_kind};
                 }
-            } catch (const xgrammar::XGrammarError& e) {
-                return {false, Grammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, Grammar(NullObj()), strdup(e.what()), 0};
+                return {false, Grammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
             }
         });
 
@@ -1737,7 +1897,17 @@ impl Grammar {
 /// [`GrammarMatcher::traverse_draft_tree`] and
 /// [`BatchGrammarMatcher::batch_fill_next_token_bitmask`]. Mirrors the
 /// upstream free function `xgrammar::GetBitmaskSize`.
+///
+/// # Panics
+/// Panics if `vocab_size` is not positive: the upstream computation is plain
+/// C++ `int` arithmetic, so a non-positive or near-`i32::MAX` input would
+/// wrap or overflow instead of failing.
 pub fn get_bitmask_size(vocab_size: i32) -> i32 {
+    assert!(
+        (1..=i32::MAX - 31).contains(&vocab_size),
+        "vocab_size must be in 1..={} (got {vocab_size})",
+        i32::MAX - 31
+    );
     cpp!(unsafe [vocab_size as "int"] -> i32 as "int32_t" {
         return xgrammar::GetBitmaskSize(vocab_size);
     })
@@ -1784,8 +1954,8 @@ impl GrammarMatcher {
             std::optional<std::vector<int32_t>> opt_override_stop_tokens;
             if (override_stop_tokens_len > 0) {
                 opt_override_stop_tokens = std::vector<int32_t>(
-                    *override_stop_tokens_ptr,
-                    *override_stop_tokens_ptr + override_stop_tokens_len
+                    override_stop_tokens_ptr,
+                    override_stop_tokens_ptr + override_stop_tokens_len
                 );
             } else {
                 opt_override_stop_tokens = std::nullopt;
@@ -1835,12 +2005,19 @@ impl GrammarMatcher {
     /// * Whether the string is accepted.
     pub fn accept_string(&mut self, input_str: &str, debug_print: Option<bool>) -> bool {
         let debug_print = debug_print.unwrap_or(false);
-        let input_str_cstring =
-            CString::new(input_str).expect("Failed to convert input_str to CString");
-        let input_str_ptr = input_str_cstring.as_ptr();
+        let input_str_ptr = input_str.as_ptr();
+        let input_str_len = input_str.len();
 
-        cpp!(unsafe [self as "xgrammar::GrammarMatcher*", input_str_ptr as "const char*", debug_print as "bool"] -> bool as "bool" {
-            return self->AcceptString(input_str_ptr, debug_print);
+        cpp!(unsafe [
+            self as "xgrammar::GrammarMatcher*",
+            input_str_ptr as "const uint8_t*",
+            input_str_len as "size_t",
+            debug_print as "bool"
+        ] -> bool as "bool" {
+            return self->AcceptString(
+                std::string(reinterpret_cast<const char*>(input_str_ptr), input_str_len),
+                debug_print
+            );
         })
     }
 
@@ -1866,6 +2043,7 @@ impl GrammarMatcher {
         index: Option<usize>,
         debug_print: Option<bool>,
     ) -> Result<bool> {
+        ensure_row_major_contiguous(next_token_bitmask, "next_token_bitmask")?;
         let dl_tensor = next_token_bitmask.dl_tensor();
         let index = index.unwrap_or(0) as i32;
         let debug_print = debug_print.unwrap_or(false);
@@ -1874,10 +2052,8 @@ impl GrammarMatcher {
             try {
                 bool value = self->FillNextTokenBitmask(dl_tensor, index, debug_print);
                 return {true, value, nullptr, 0};
-            } catch (const xgrammar::XGrammarError& e) {
-                return {false, false, strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, false, strdup(e.what()), 0};
+                return {false, false, strdup(e.what()), xgr_error_kind(e)};
             }
         });
 
@@ -1918,19 +2094,31 @@ impl GrammarMatcher {
     /// A draft token that is out of vocabulary range or not permitted by its
     /// parent's bitmask row gets its row zeroed, and its **entire subtree is
     /// skipped without touching the descendants' rows** (they keep whatever the
-    /// caller pre-filled). Traversal then continues with the node's siblings
-    /// and still returns `Ok(true)`. A node whose acceptance terminates the
-    /// matcher also gets a zeroed row.
+    /// caller pre-filled). A node whose acceptance *terminates* the matcher is
+    /// treated the same way: its row is zeroed (no token may follow) and its
+    /// subtree is skipped. In both cases traversal continues with the node's
+    /// siblings and still returns `Ok(true)`. Calling this method on an
+    /// already-terminated matcher likewise returns `Ok(true)` with row `0`
+    /// zeroed and every other row untouched (unlike
+    /// [`Self::fill_next_token_bitmask`], which returns an error).
+    ///
+    /// The C++ traversal recurses once per tree level, so extremely deep
+    /// chains (hundreds of thousands of nodes in a line) can exhaust the
+    /// native stack.
     ///
     /// # Returns
     /// * `Ok(true)` - The traversal completed. The matcher state is unchanged
     ///   (internal accepts and rollbacks cancel out).
     /// * `Ok(false)` - The traversal timed out. Row `0` is always filled (the
-    ///   timeout is only checked at non-root nodes), but other rows may be
-    ///   partial and the matcher state is not guaranteed to be restored — call
-    ///   [`Self::reset`] (or discard the matcher) before reusing it.
+    ///   timeout is only checked at non-root nodes) and unvisited rows keep
+    ///   whatever the caller pre-filled, but the matcher state is fully
+    ///   restored — every internal accept is rolled back as the failure
+    ///   propagates — so the matcher can keep being used without a
+    ///   [`Self::reset`].
     /// * `Err(XGrammarErr::MatcherError)` - A tensor has an invalid dtype,
-    ///   shape, or device type, or the tree encoding is invalid.
+    ///   shape, or device type, is not row-major contiguous, or the tree
+    ///   encoding is invalid (a link outside `[-1, N)`, or a node reachable
+    ///   more than once).
     ///
     /// # Example
     /// ```no_run
@@ -1964,6 +2152,21 @@ impl GrammarMatcher {
         token_bitmask: &mut DLTensor,
         time_threshold: Option<f64>,
     ) -> Result<bool> {
+        ensure_row_major_contiguous(retrieve_next_token, "retrieve_next_token")?;
+        ensure_row_major_contiguous(retrieve_next_sibling, "retrieve_next_sibling")?;
+        ensure_row_major_contiguous(draft_tokens, "draft_tokens")?;
+        ensure_row_major_contiguous(token_bitmask, "token_bitmask")?;
+        // The C++ traversal follows the tree links without any bounds or
+        // cycle check, so validate them here. Tensors that are not 1-D int64
+        // CPU are skipped: the C++ side rejects those itself before touching
+        // any link.
+        if let (Some(next_token), Some(next_sibling)) =
+            (as_cpu_i64_slice(retrieve_next_token), as_cpu_i64_slice(retrieve_next_sibling))
+            && next_token.len() == next_sibling.len()
+        {
+            validate_draft_tree(next_token, next_sibling)?;
+        }
+
         let retrieve_next_token = retrieve_next_token.dl_tensor();
         let retrieve_next_sibling = retrieve_next_sibling.dl_tensor();
         let draft_tokens = draft_tokens.dl_tensor();
@@ -1987,10 +2190,8 @@ impl GrammarMatcher {
                     time_threshold
                 );
                 return {true, value, nullptr, 0};
-            } catch (const xgrammar::XGrammarError& e) {
-                return {false, false, strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, false, strdup(e.what()), 0};
+                return {false, false, strdup(e.what()), xgr_error_kind(e)};
             }
         });
 
@@ -2016,10 +2217,8 @@ impl GrammarMatcher {
             try {
                 self->Rollback(num_tokens);
                 return {true, false, nullptr, 0};
-            } catch (const xgrammar::XGrammarError& e) {
-                return {false, false, strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, false, strdup(e.what()), 0};
+                return {false, false, strdup(e.what()), xgr_error_kind(e)};
             }
         });
 
@@ -2176,6 +2375,7 @@ impl BatchGrammarMatcher {
         indices: Option<&[i32]>,
         debug_print: Option<bool>,
     ) -> Result<()> {
+        ensure_row_major_contiguous(next_token_bitmask, "next_token_bitmask")?;
         let dl_tensor = next_token_bitmask.dl_tensor();
         let debug_print = debug_print.unwrap_or(false);
         let matchers_ptr = matchers.as_mut_ptr();
@@ -2216,10 +2416,8 @@ impl BatchGrammarMatcher {
                     &matchers_vec, dl_tensor, opt_indices, debug_print
                 );
                 return {true, false, nullptr, 0};
-            } catch (const xgrammar::XGrammarError& e) {
-                return {false, false, strdup(e.what()), xgr_error_kind(e)};
             } catch (const std::exception& e) {
-                return {false, false, strdup(e.what()), 0};
+                return {false, false, strdup(e.what()), xgr_error_kind(e)};
             }
         });
 
@@ -2291,14 +2489,13 @@ impl BatchGrammarMatcher {
         let matchers_ptr = matchers.as_mut_ptr();
         let num_matchers = matchers.len();
 
-        let cstrings: Vec<CString> = input_strs
-            .iter()
-            .map(|s| CString::new(*s).expect("Failed to convert input_str to CString"))
-            .collect();
-        let c_ptrs: Vec<*const std::os::raw::c_char> =
-            cstrings.iter().map(|c| c.as_ptr()).collect();
-        let c_ptrs_ptr = c_ptrs.as_ptr();
-        let num_strs = c_ptrs.len();
+        // Marshal each string as pointer + length (not CString): inputs may
+        // legally contain NUL bytes, which upstream's std::string preserves.
+        let str_ptrs: Vec<*const u8> = input_strs.iter().map(|s| s.as_ptr()).collect();
+        let str_lens: Vec<usize> = input_strs.iter().map(|s| s.len()).collect();
+        let str_ptrs_ptr = str_ptrs.as_ptr();
+        let str_lens_ptr = str_lens.as_ptr();
+        let num_strs = input_strs.len();
         let mut out_buf = vec![0u8; num_matchers];
         let out_ptr = out_buf.as_mut_ptr();
 
@@ -2308,7 +2505,8 @@ impl BatchGrammarMatcher {
         cpp!(unsafe [
             matchers_ptr as "xgrammar::GrammarMatcher*",
             num_matchers as "size_t",
-            c_ptrs_ptr as "const char* const*",
+            str_ptrs_ptr as "const uint8_t* const*",
+            str_lens_ptr as "const size_t*",
             num_strs as "size_t",
             out_ptr as "uint8_t*",
             debug_print as "bool"
@@ -2319,7 +2517,9 @@ impl BatchGrammarMatcher {
             std::vector<std::string> input_strs_vec;
             input_strs_vec.reserve(num_strs);
             for (size_t i = 0; i < num_strs; ++i) {
-                input_strs_vec.emplace_back(c_ptrs_ptr[i]);
+                input_strs_vec.emplace_back(
+                    reinterpret_cast<const char*>(str_ptrs_ptr[i]), str_lens_ptr[i]
+                );
             }
             auto out = xgrammar::BatchGrammarMatcher::BatchAcceptString(
                 &matchers_vec, input_strs_vec, debug_print
@@ -2331,10 +2531,10 @@ impl BatchGrammarMatcher {
         });
 
         // Anchor the backing storage here — after the `cpp!` block — so NLL
-        // cannot drop `cstrings` or `c_ptrs` while C++ still holds pointers
+        // cannot drop `str_ptrs` or `str_lens` while C++ still holds pointers
         // derived from them. The `let _` binding is a use-site that extends
         // both values' liveness to this line.
-        let _keep_alive = (&cstrings, &c_ptrs);
+        let _keep_alive = (&str_ptrs, &str_lens);
         out_buf.into_iter().map(|b| b != 0).collect()
     }
 

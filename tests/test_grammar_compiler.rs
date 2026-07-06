@@ -271,14 +271,45 @@ fn test_compiled_grammar_serialize_roundtrip() {
     let mut matcher = GrammarMatcher::new(&restored);
     assert!(matcher.accept_string("{\"a\":1}", None));
     assert!(matcher.is_terminated());
+
+    // A tokenizer whose metadata fingerprint (here: vocab size) differs from
+    // the serialized one must be rejected — the fingerprint is embedded in
+    // the serialized data and validated on deserialization.
+    let mismatched =
+        TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, Some(102_401), None)
+            .expect("Failed to load tokenizer info");
+    let Err(XGrammarErr::DeserializeFormat(err_msg)) =
+        CompiledGrammar::deserialize_json(&json, &mismatched)
+    else {
+        panic!("Expected DeserializeFormat");
+    };
+    assert!(err_msg.contains("Tokenizer metadata mismatch"), "unexpected message: {err_msg}");
+
+    // Upstream ignores failures while deserializing the "grammar" field; the
+    // binding detects the resulting null grammar instead of returning Ok.
+    let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    value["grammar"] = json!(42);
+    let Err(XGrammarErr::DeserializeFormat(err_msg)) =
+        CompiledGrammar::deserialize_json(&value.to_string(), &tok_info)
+    else {
+        panic!("Expected DeserializeFormat");
+    };
+    assert!(err_msg.contains("'grammar' field failed"), "unexpected message: {err_msg}");
 }
 
 #[test]
 fn test_compiled_grammar_deserialize_error() {
     use xgrammar::CompiledGrammar;
 
-    let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
-        .expect("Failed to load tokenizer info");
+    // The call fails while parsing the JSON, before the tokenizer info is
+    // ever consulted — a minimal in-memory tokenizer avoids loading a full
+    // pretrained vocabulary just to construct the unused argument.
+    let tok_info = TokenizerInfo::from_backend_str(
+        r#"{"model":{"type":"WordLevel","vocab":{"a":0,"b":1},"unk_token":"a"}}"#,
+        None,
+        vec![],
+    )
+    .expect("Failed to build tokenizer info");
 
     let Err(XGrammarErr::InvalidJson(err_msg)) =
         CompiledGrammar::deserialize_json("garbage", &tok_info)

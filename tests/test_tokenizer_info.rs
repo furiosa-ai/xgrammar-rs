@@ -106,3 +106,16 @@ fn test_tokenizer_info_deserialize_error() {
     };
     assert!(err_msg.contains("Invalid JSON error"), "unexpected message: {err_msg}");
 }
+
+#[test]
+fn test_tokenizer_info_deserialize_untyped_error() {
+    use xgrammar::XGrammarErr;
+
+    // Valid JSON that is not an object bypasses the typed error construction
+    // upstream (a plain runtime_error from picojson) and surfaces as the
+    // untyped fallback for this type.
+    let Err(XGrammarErr::TokenizerInfoError(_)) = TokenizerInfo::deserialize_json("[1, 2, 3]")
+    else {
+        panic!("Expected TokenizerInfoError");
+    };
+}
