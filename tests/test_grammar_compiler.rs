@@ -285,16 +285,21 @@ fn test_compiled_grammar_serialize_roundtrip() {
     };
     assert!(err_msg.contains("Tokenizer metadata mismatch"), "unexpected message: {err_msg}");
 
-    // Upstream ignores failures while deserializing the "grammar" field; the
-    // binding detects the resulting null grammar instead of returning Ok.
-    let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
-    value["grammar"] = json!(42);
-    let Err(XGrammarErr::DeserializeFormat(err_msg)) =
-        CompiledGrammar::deserialize_json(&value.to_string(), &tok_info)
-    else {
-        panic!("Expected DeserializeFormat");
-    };
-    assert!(err_msg.contains("'grammar' field failed"), "unexpected message: {err_msg}");
+    // Upstream rejects malformed or null grammars and malformed token masks.
+    // These errors must reach Rust callers as DeserializeFormat.
+    for (field, invalid_value) in
+        [("grammar", json!(42)), ("grammar", json!(null)), ("adaptive_token_mask_cache", json!(42))]
+    {
+        let mut value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        value[field] = invalid_value;
+        assert!(
+            matches!(
+                CompiledGrammar::deserialize_json(&value.to_string(), &tok_info),
+                Err(XGrammarErr::DeserializeFormat(_))
+            ),
+            "Expected DeserializeFormat for invalid {field}"
+        );
+    }
 }
 
 #[test]
