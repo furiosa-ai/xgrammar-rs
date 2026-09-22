@@ -2,10 +2,6 @@
 
 This project uses [xgrammar](https://github.com/mlc-ai/xgrammar) **v0.2.7** as a submodule.
 
-Starting with this release, the Rust crate version matches the upstream XGrammar
-version. This replaces the independent versioning used through crate v0.5.0;
-when upgrading from v0.5.0, update the dependency requirement to `xgrammar = "0.2.7"`.
-
 [![CI](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/ci.yml) [![Deploy Docs](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/docs.yml/badge.svg)](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/docs.yml)
 
 This project provides safe and idiomatic Rust bindings for the `xgrammar` C++ library.
