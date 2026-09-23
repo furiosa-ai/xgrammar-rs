@@ -81,19 +81,12 @@ fn test_tokenizer_info_serialize_roundtrip() {
     // Serializing the restored info must reproduce the same JSON.
     assert_eq!(json, restored.serialize_json());
 
-    // The vocab survives byte-for-byte except for tokens containing NUL:
-    // xgrammar v0.2.3 truncates strings at the first NUL byte during
-    // serialization (ByteToLatin1 in cpp/support/encoding.h iterates with
-    // C-string semantics), so such tokens come back truncated.
+    // The vocab survives byte-for-byte, including tokens containing NUL.
     let original_vocab = tokenizer_info.get_decoded_vocab();
     let restored_vocab = restored.get_decoded_vocab();
     assert_eq!(original_vocab.len(), restored_vocab.len());
     for (i, (original, restored)) in original_vocab.iter().zip(restored_vocab.iter()).enumerate() {
-        let expected = match original.find('\0') {
-            Some(nul_idx) => &original[..nul_idx],
-            None => original.as_str(),
-        };
-        assert_eq!(restored.as_str(), expected, "vocab mismatch at token id {i}");
+        assert_eq!(restored, original, "vocab mismatch at token id {i}");
     }
 }
 

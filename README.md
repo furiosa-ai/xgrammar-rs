@@ -1,6 +1,6 @@
 # xgrammar-rs
 
-This project uses [xgrammar](https://github.com/mlc-ai/xgrammar) **v0.2.3** as a submodule.
+This project uses [xgrammar](https://github.com/mlc-ai/xgrammar) **v0.2.7** as a submodule.
 
 [![CI](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/ci.yml) [![Deploy Docs](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/docs.yml/badge.svg)](https://github.com/furiosa-ai/xgrammar-rs/actions/workflows/docs.yml)
 
@@ -31,7 +31,7 @@ for constraint decoding.
   coarse-grained variants kept as fallbacks for untyped C++ errors.
 - Linux `x86_64` and `aarch64` (arm64) are both supported.
 
-See the [rustdoc](https://docs.rs/xgrammar/latest/xgrammar/) for detailed method-level documentation, including when a
+See the [rustdoc](https://docs.rs/xgrammar/0.2.7/xgrammar/) for detailed method-level documentation, including when a
 `BatchGrammarMatcher` instance is required vs when associated functions can be
 called directly.
 

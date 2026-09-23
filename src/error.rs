@@ -45,8 +45,7 @@ pub enum XGrammarErr {
     #[error("{0}")]
     InvalidJson(String),
     /// The JSON schema is invalid or unsatisfiable (defined upstream but not
-    /// constructed as of xgrammar v0.2.3 — reserved for forward
-    /// compatibility).
+    /// currently constructed — reserved for forward compatibility).
     #[error("{0}")]
     InvalidJsonSchema(String),
     /// The structural tag specification is invalid.

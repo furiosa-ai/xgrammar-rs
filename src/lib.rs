@@ -724,9 +724,7 @@ impl TokenizerInfo {
     ///
     /// Non-UTF-8 vocab bytes survive the round-trip (the upstream serializer
     /// maps raw bytes to Latin-1 code points, so the JSON text is always valid
-    /// UTF-8), with one upstream limitation: vocab tokens containing a NUL
-    /// byte are truncated at the first NUL during serialization (xgrammar
-    /// v0.2.3, `ByteToLatin1` in `cpp/support/encoding.h`).
+    /// UTF-8). Vocab tokens containing NUL bytes are preserved as well.
     pub fn serialize_json(&self) -> String {
         let mut out = String::new();
         let out_ptr = &mut out as *mut String;
@@ -903,10 +901,6 @@ impl CompiledGrammar {
     ///   embedded tokenizer metadata (`"Tokenizer metadata mismatch: ..."`)
     /// * [`XGrammarErr::CompilationError`] if an untyped xgrammar error is
     ///   raised while reconstructing the compiled grammar
-    ///
-    /// Note: the vendored xgrammar ignores failures while deserializing the
-    /// embedded `adaptive_token_mask_cache` payload, so a corrupted mask
-    /// cache may still deserialize without an error.
     pub fn deserialize_json(json: &str, tokenizer_info: &TokenizerInfo) -> Result<Self> {
         // Pointer + length marshaling — see Grammar::deserialize_json for the
         // rationale.
@@ -936,20 +930,7 @@ impl CompiledGrammar {
             }
         });
 
-        let compiled = Result::<Self>::from(result)?;
-        // The vendored xgrammar ignores the error returned while
-        // deserializing the "grammar" field (see DeserializeJSONValue in
-        // thirdparty/xgrammar/cpp/compiled_grammar.cc), which leaves the
-        // field as a null grammar and would otherwise surface much later as
-        // a crash inside the matcher. Detect that tell-tale state here.
-        if compiled.get_grammar().is_null() {
-            return Err(XGrammarErr::DeserializeFormat(
-                "Deserialize error for type CompiledGrammar: the 'grammar' field failed to \
-                 deserialize"
-                    .to_string(),
-            ));
-        }
-        Ok(compiled)
+        Result::<Self>::from(result)
     }
 }
 
@@ -1811,8 +1792,8 @@ impl Grammar {
 
     /// Serialize the grammar to a JSON string.
     ///
-    /// The output is tied to xgrammar's internal serialization version (v14 as
-    /// of the vendored xgrammar v0.2.3): it can only be read back by
+    /// The output is tied to xgrammar's internal serialization version (v16 as
+    /// of the vendored xgrammar v0.2.7): it can only be read back by
     /// [`Self::deserialize_json`] of a build using the same serialization
     /// version.
     ///
