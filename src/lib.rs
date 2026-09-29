@@ -1213,6 +1213,53 @@ impl GrammarCompiler {
         result.into()
     }
 
+    /// Compile a grammar from a Lark grammar string.
+    ///
+    /// Named special tokens (e.g. `<|im_end|>`) and token-id sets (e.g. `<[0-9]>`,
+    /// `<[^0-4095]>`) are resolved against this compiler's tokenizer info.
+    ///
+    /// # Arguments
+    /// * `lark_string` - The Lark grammar. The root rule must be named `start`.
+    ///
+    /// # Returns
+    /// * `Ok(CompiledGrammar)` - A compiled grammar that can be used with GrammarMatcher
+    /// * `Err(XGrammarErr)` - Error if the Lark grammar is invalid or compilation fails
+    ///
+    /// # Errors
+    /// * Returns error if the Lark grammar contains syntax errors
+    /// * Returns error if the `start` rule is not defined
+    /// * Returns error if a special token is unknown to the tokenizer
+    ///
+    /// # Example
+    /// ```
+    /// # use xgrammar::{GrammarCompiler, TokenizerInfo};
+    /// # fn example(tokenizer_info: &TokenizerInfo) -> xgrammar::Result<()> {
+    /// let compiler = GrammarCompiler::new(tokenizer_info);
+    /// let compiled = compiler.compile_lark(r#"start: "yes" | "no""#)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn compile_lark(&self, lark_string: &str) -> Result<CompiledGrammar> {
+        let lark_string_ptr = lark_string.as_ptr();
+        let lark_string_len = lark_string.len();
+
+        let result = cpp!(unsafe [
+            self as "xgrammar::GrammarCompiler*",
+            lark_string_ptr as "const uint8_t*",
+            lark_string_len as "size_t"
+        ] -> CompiledGrammarResult as "CompiledGrammarResult" {
+            try {
+                std::string lark_str(reinterpret_cast<const char*>(lark_string_ptr), lark_string_len);
+                auto compiled = self->CompileLark(lark_str);
+                return {true, compiled, nullptr, 0};
+            } catch (const std::exception& e) {
+                return {false, CompiledGrammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
+            }
+        });
+
+        result.into()
+    }
+
     /// Clear the internal cache of compiled grammars.
     /// This frees up memory used by cached compiled grammars.
     pub fn clear_cache(&self) {
@@ -1304,6 +1351,7 @@ impl GrammarCompiler {
 ///
 /// Grammar can be constructed from various sources:
 /// - [`Grammar::from_ebnf`]: From EBNF grammar strings
+/// - [`Grammar::from_lark`]: From Lark grammar strings
 /// - [`Grammar::from_json_schema`]: From JSON schema specifications
 /// - [`Grammar::from_regex`]: From regular expression patterns
 /// - [`Grammar::from_structural_tag`]: From structural tags with embedded schemas
@@ -1364,6 +1412,64 @@ impl Grammar {
                 auto grammar = Grammar::FromEBNF(
                     string(reinterpret_cast<const char*>(ebnf_string_ptr), ebnf_string_len),
                     string(reinterpret_cast<const char*>(root_rule_name_ptr), root_rule_name_len)
+                );
+                return {true, grammar, nullptr, 0};
+            } catch (const std::exception& e) {
+                return {false, Grammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
+            }
+        });
+
+        result.into()
+    }
+
+    /// Construct a grammar from a Lark grammar string.
+    ///
+    /// # Arguments
+    /// * `lark_string` - The Lark grammar. The root rule must be named `start`.
+    /// * `tokenizer_info` - Tokenizer used to resolve named special tokens such as
+    ///   `<|im_end|>`. Token-id sets such as `<[0-9]>` do not need it.
+    ///
+    /// # Returns
+    /// * `Ok(Grammar)` - A Grammar object constructed from the Lark specification
+    /// * `Err(XGrammarErr)` - Error if the Lark string is invalid or malformed
+    ///
+    /// # Errors
+    /// * Returns error if the Lark string contains syntax errors
+    /// * Returns error if the `start` rule is not defined
+    /// * Returns error if a named special token is used without `tokenizer_info`
+    ///
+    /// # Example
+    /// ```
+    /// # use xgrammar::Grammar;
+    /// let lark = r#"
+    /// start: "Hello, " NAME "!"
+    /// NAME: /[A-Z][a-z]+/
+    /// "#;
+    /// let grammar = Grammar::from_lark(lark, None).unwrap();
+    /// assert!(!grammar.is_null());
+    ///
+    /// // A grammar without a `start` rule is rejected
+    /// assert!(Grammar::from_lark(r#"root: "a""#, None).is_err());
+    /// ```
+    pub fn from_lark(lark_string: &str, tokenizer_info: Option<&TokenizerInfo>) -> Result<Self> {
+        let lark_string_ptr = lark_string.as_ptr();
+        let lark_string_len = lark_string.len();
+        let tokenizer_info_ptr: *const TokenizerInfo =
+            tokenizer_info.map(|t| t as *const TokenizerInfo).unwrap_or(std::ptr::null());
+
+        let result = cpp!(unsafe [
+            lark_string_ptr as "const uint8_t*",
+            lark_string_len as "size_t",
+            tokenizer_info_ptr as "const xgrammar::TokenizerInfo*"
+        ] -> GrammarResult as "GrammarResult" {
+            try {
+                std::optional<xgrammar::TokenizerInfo> opt_tokenizer_info;
+                if (tokenizer_info_ptr != nullptr) {
+                    opt_tokenizer_info = *tokenizer_info_ptr;
+                }
+                auto grammar = Grammar::FromLark(
+                    string(reinterpret_cast<const char*>(lark_string_ptr), lark_string_len),
+                    opt_tokenizer_info
                 );
                 return {true, grammar, nullptr, 0};
             } catch (const std::exception& e) {

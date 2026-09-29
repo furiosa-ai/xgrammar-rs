@@ -1,9 +1,10 @@
 mod common;
 
 use serde_json::json;
-use xgrammar::{GrammarCompiler, TokenizerInfo, VocabType, XGrammarErr};
+use xgrammar::{GrammarCompiler, GrammarMatcher, TokenizerInfo, VocabType, XGrammarErr};
 
 const EXAONE_4_0_32B_PRETRAINED_ID: &str = "LGAI-EXAONE/EXAONE-4.0-32B";
+const GPT_OSS_20B_PRETRAINED_ID: &str = "openai/gpt-oss-20b";
 
 #[test]
 fn test_compile_builtin_json_grammar() {
@@ -169,6 +170,65 @@ fn test_compile_regex() {
         assert_eq!(compiled_regex.get_tokenizer_info().get_vocab_size(), 102400);
         assert_eq!(compiled_regex.get_tokenizer_info().get_vocab_type(), VocabType::ByteLevel);
     }
+}
+
+#[test]
+fn test_compile_lark() {
+    let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
+        .expect("Failed to load tokenizer info");
+    let compiler = GrammarCompiler::new(&tok_info);
+
+    let lark = r#"
+        start: "<think>" REASON "</think>" answer
+        REASON: /[a-z .]+/
+        answer: "apple" | "banana"
+    "#;
+    let compiled_grammar = compiler.compile_lark(lark).expect("Failed to compile Lark grammar");
+    assert!(compiled_grammar.memory_size_bytes() > 0);
+
+    let accepts = |text: &str| {
+        let mut matcher = GrammarMatcher::with(&compiled_grammar, None, Some(true), None);
+        matcher.accept_string(text, None) && matcher.is_terminated()
+    };
+    assert!(accepts("<think>let me think.</think>banana"));
+    assert!(!accepts("<think>let me think.</think>cherry"));
+}
+
+/// Named special tokens resolve against the compiler's tokenizer, and token-id
+/// sets (`<[...]>`, `<[^...]>`) constrain token ids directly.
+#[test]
+fn test_compile_lark_special_tokens() {
+    let tok_info = TokenizerInfo::from_pretrained(GPT_OSS_20B_PRETRAINED_ID, None, None, None)
+        .expect("Failed to load tokenizer info");
+    let token_id = |token: &str| {
+        tok_info.get_decoded_vocab().iter().position(|t| t == token).unwrap_or_else(|| {
+            panic!("token {token} should be in the vocab");
+        }) as i32
+    };
+    let (start, end) = (token_id("<|start|>"), token_id("<|end|>"));
+    let compiler = GrammarCompiler::new(&tok_info);
+
+    let lark =
+        format!("start: <|start|> non_special{{0,2}} <|end|>\nnon_special: <[^{start}-{end}]>");
+    let compiled_grammar =
+        compiler.compile_lark(&lark).expect("Failed to compile Lark grammar with special tokens");
+    let accepts = |token_ids: &[i32]| {
+        let mut matcher = GrammarMatcher::with(&compiled_grammar, None, Some(true), None);
+        token_ids.iter().all(|&t| matcher.accept_token(t, None)) && matcher.is_terminated()
+    };
+
+    assert!(accepts(&[start, end]));
+    assert!(accepts(&[start, 100, 200, end]));
+    // The budget of two non-special tokens is exceeded.
+    assert!(!accepts(&[start, 100, 200, 300, end]));
+    // `<|start|>` and `<|end|>` are excluded from `non_special`.
+    assert!(!accepts(&[start, start, end]));
+
+    let Err(XGrammarErr::CompilationError(err_msg)) = compiler.compile_lark("start: <|nope|>")
+    else {
+        panic!("Expected compilation to fail for an unknown special token");
+    };
+    assert!(err_msg.contains("unknown special token <|nope|>"), "unexpected message: {err_msg}");
 }
 
 #[test]

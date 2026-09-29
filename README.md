@@ -12,7 +12,7 @@ for constraint decoding.
 ## Highlights
 
 - `Grammar`, `GrammarCompiler`, `CompiledGrammar`, `TokenizerInfo` — core API
-  for compiling grammars (BNF, JSON schema, regex, structural tags) against a
+  for compiling grammars (BNF, Lark, JSON schema, regex, structural tags) against a
   tokenizer.
 - `GrammarMatcher` — token-by-token constrained decoding, including
   `is_completed()` (root-rule match without stop token), `fork()` for

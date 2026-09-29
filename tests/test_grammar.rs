@@ -13,6 +13,35 @@ fn test_grammar_from_ebnf() {
 }
 
 #[test]
+fn test_grammar_from_lark() {
+    let lark = r#"
+        start: "a" item+
+        item: "b" | "c"
+    "#;
+    let grammar = Grammar::from_lark(lark, None).unwrap();
+    assert!(!grammar.is_null());
+
+    // Token-id sets resolve without tokenizer info.
+    let grammar = Grammar::from_lark("start: <[0-9]> <[^0-4095]>", None).unwrap();
+    assert!(!grammar.is_null());
+}
+
+#[test]
+fn test_grammar_from_lark_errors() {
+    let Err(XGrammarErr::InvalidGrammar(err_msg)) = Grammar::from_lark(r#"root: "a""#, None) else {
+        panic!("Expected InvalidGrammar for a grammar without a start rule");
+    };
+    assert!(err_msg.contains("Lark error"), "unexpected message: {err_msg}");
+
+    // Named special tokens can only be resolved against a tokenizer.
+    let Err(XGrammarErr::InvalidGrammar(err_msg)) = Grammar::from_lark("start: <|end|>", None)
+    else {
+        panic!("Expected InvalidGrammar for a named special token without tokenizer info");
+    };
+    assert!(err_msg.contains("requires tokenizer_info"), "unexpected message: {err_msg}");
+}
+
+#[test]
 fn test_grammar_from_json_schema() {
     let schema = json!({
         "type": "object",
