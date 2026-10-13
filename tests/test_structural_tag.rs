@@ -1,5 +1,5 @@
 use serde_json::json;
-use xgrammar::Grammar;
+use xgrammar::{Grammar, GrammarCompiler, GrammarMatcher, TokenizerInfo};
 
 // ============================================================================
 // Basic Format Types
@@ -42,6 +42,47 @@ fn test_json_schema_format() {
     let grammar = Grammar::from_structural_tag(&structural_tag.to_string(), None);
     assert!(grammar.is_ok());
     assert!(!grammar.unwrap().is_null());
+}
+
+/// JSON schema exclusions reject control strings in values and property names.
+#[test]
+fn test_json_schema_format_excludes() {
+    let structural_tag = json!({
+        "type": "structural_tag",
+        "format": {
+            "type": "json_schema",
+            "json_schema": {
+                "type": "object",
+                "additionalProperties": {"type": "string"}
+            },
+            "excludes": ["<|close|>"]
+        }
+    });
+    let grammar = Grammar::from_structural_tag(&structural_tag.to_string(), None)
+        .expect("Failed to build grammar with exclusions");
+    let tokenizer_info = TokenizerInfo::from_backend_str(
+        r#"{"model":{"type":"WordLevel","vocab":{"a":0},"unk_token":"a"}}"#,
+        None,
+        vec![],
+    )
+    .expect("Failed to build tokenizer info");
+    let compiled = GrammarCompiler::new(&tokenizer_info)
+        .compile_grammar(&grammar)
+        .expect("Failed to compile grammar with exclusions");
+    let mut matcher = GrammarMatcher::new(&compiled);
+
+    for (input, accepted) in [
+        (r#"{"good":"safe"}"#, true),
+        (r#"{"good":"안녕🦋"}"#, true),
+        (r#"{"good":"x<|close|>y"}"#, false),
+        (r#"{"x<|close|>y":"safe"}"#, false),
+    ] {
+        matcher.reset();
+        assert_eq!(matcher.accept_string(input, None), accepted, "input: {input}");
+        if accepted {
+            assert!(matcher.is_completed(), "input should complete the grammar: {input}");
+        }
+    }
 }
 
 /// Test regex format: matches regular expression patterns
