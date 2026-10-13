@@ -1158,6 +1158,12 @@ impl GrammarCompiler {
     /// * `separators` - Custom separators as (object_separator, array_separator), e.g., (":", ","). None uses default separators
     /// * `strict_mode` - Whether to enforce strict JSON schema validation. None uses true
     /// * `max_whitespace_cnt` - Maximum number of consecutive whitespace characters allowed. None means no limit
+    /// * `any_order` - Whether object properties may appear in any order, including in nested
+    ///   objects. None uses false, preserving the schema's declared property order
+    ///
+    /// When `any_order` is true, each property's key and value are validated, but required-key
+    /// presence and key uniqueness are not enforced. The total entry count is still bounded by
+    /// `max(minProperties, number of required properties)` and `maxProperties`.
     ///
     /// # Returns
     /// * `Ok(CompiledGrammar)` - A compiled grammar that can be used with GrammarMatcher
@@ -1173,10 +1179,11 @@ impl GrammarCompiler {
     /// # fn example(tokenizer_info: &TokenizerInfo) -> xgrammar::Result<()> {
     /// let compiler = GrammarCompiler::new(tokenizer_info);
     /// let schema = r#"{"type": "object", "properties": {"name": {"type": "string"}}}"#;
-    /// let compiled = compiler.compile_json_schema(schema, None, None, None, None, None)?;
+    /// let compiled = compiler.compile_json_schema(schema, None, None, None, None, None, None)?;
     /// # Ok(())
     /// # }
     /// ```
+    #[allow(clippy::too_many_arguments)] // Keep the options aligned with the upstream API.
     pub fn compile_json_schema(
         &self,
         schema: &str,
@@ -1185,11 +1192,13 @@ impl GrammarCompiler {
         separators: Option<(String, String)>,
         strict_mode: Option<bool>,
         max_whitespace_cnt: Option<i32>,
+        any_order: Option<bool>,
     ) -> Result<CompiledGrammar> {
         let schema_ptr = schema.as_ptr();
         let schema_len = schema.len();
         let any_whitespace = any_whitespace.unwrap_or(true);
         let strict_mode = strict_mode.unwrap_or(true);
+        let any_order = any_order.unwrap_or(false);
         let has_indent = indent.is_some();
         let indent_value = indent.unwrap_or(0);
         let has_separators = separators.is_some();
@@ -1220,7 +1229,8 @@ impl GrammarCompiler {
             array_sep_len as "size_t",
             strict_mode as "bool",
             has_max_whitespace_cnt as "bool",
-            max_whitespace_cnt_value as "int"
+            max_whitespace_cnt_value as "int",
+            any_order as "bool"
         ] -> CompiledGrammarResult as "CompiledGrammarResult" {
             try {
                 std::string schema_str(reinterpret_cast<const char*>(schema_ptr), schema_len);
@@ -1238,7 +1248,15 @@ impl GrammarCompiler {
 
                 std::optional<int> opt_max_whitespace_cnt = has_max_whitespace_cnt ? std::make_optional(max_whitespace_cnt_value) : std::nullopt;
 
-                auto compiled = self->CompileJSONSchema(schema_str, any_whitespace, opt_indent, opt_separators, strict_mode, opt_max_whitespace_cnt);
+                auto compiled = self->CompileJSONSchema(
+                    schema_str,
+                    any_whitespace,
+                    opt_indent,
+                    opt_separators,
+                    strict_mode,
+                    opt_max_whitespace_cnt,
+                    any_order
+                );
                 return {true, compiled, nullptr, 0};
             } catch (const std::exception& e) {
                 return {false, CompiledGrammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
@@ -1615,6 +1633,12 @@ impl Grammar {
     /// * `max_whitespace_cnt` - Maximum number of consecutive whitespace characters allowed.
     ///   Useful for preventing excessive whitespace in generated output
     /// * `print_converted_ebnf` - Whether to print the converted EBNF grammar for debugging purposes
+    /// * `any_order` - Whether object properties may appear in any order, including in nested
+    ///   objects. None uses false, preserving the schema's declared property order
+    ///
+    /// When `any_order` is true, each property's key and value are validated, but required-key
+    /// presence and key uniqueness are not enforced. The total entry count is still bounded by
+    /// `max(minProperties, number of required properties)` and `maxProperties`.
     ///
     /// # Returns
     /// * `Ok(Grammar)` - A Grammar object that enforces the JSON schema constraints
@@ -1642,14 +1666,16 @@ impl Grammar {
     ///     None,          // default separators
     ///     Some(true),    // strict mode
     ///     None,          // no whitespace limit
-    ///     Some(false)    // don't print EBNF
+    ///     Some(false),   // don't print EBNF
+    ///     Some(true)     // allow properties in any order
     /// ).unwrap();
     /// assert!(!grammar.is_null());
     ///
     /// // Invalid JSON schema will return an error
     /// let invalid_schema = r#"{ invalid json }"#;
-    /// assert!(Grammar::from_json_schema(invalid_schema, None, None, None, None, None, None).is_err());
+    /// assert!(Grammar::from_json_schema(invalid_schema, None, None, None, None, None, None, None).is_err());
     /// ```
+    #[allow(clippy::too_many_arguments)] // Keep the options aligned with the upstream API.
     pub fn from_json_schema(
         schema: &str,
         any_whitespace: Option<bool>,
@@ -1658,12 +1684,14 @@ impl Grammar {
         strict_mode: Option<bool>,
         max_whitespace_cnt: Option<i32>,
         print_converted_ebnf: Option<bool>,
+        any_order: Option<bool>,
     ) -> Result<Self> {
         let schema_ptr = schema.as_ptr();
         let schema_len = schema.len();
         let any_whitespace = any_whitespace.unwrap_or(true);
         let strict_mode = strict_mode.unwrap_or(true);
         let print_converted_ebnf = print_converted_ebnf.unwrap_or(false);
+        let any_order = any_order.unwrap_or(false);
         let has_indent = indent.is_some();
         let indent_value = indent.unwrap_or(0);
         let has_separators = separators.is_some();
@@ -1694,7 +1722,8 @@ impl Grammar {
             strict_mode as "bool",
             has_max_whitespace_cnt as "bool",
             max_whitespace_cnt_value as "int",
-            print_converted_ebnf as "bool"
+            print_converted_ebnf as "bool",
+            any_order as "bool"
         ] -> GrammarResult as "GrammarResult" {
             try {
                 std::string schema_str(reinterpret_cast<const char*>(schema_ptr), schema_len);
@@ -1719,7 +1748,8 @@ impl Grammar {
                     opt_separators,
                     strict_mode,
                     opt_max_whitespace_cnt,
-                    print_converted_ebnf
+                    print_converted_ebnf,
+                    any_order
                 );
                 return {true, grammar, nullptr, 0};
             } catch (const std::exception& e) {
