@@ -52,6 +52,9 @@ fn main() {
     // Re-run if any of these files change
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/lib.rs");
+    // Upstream releases can change C++ sources without changing public headers.
+    println!("cargo:rerun-if-changed=thirdparty/xgrammar/CMakeLists.txt");
+    println!("cargo:rerun-if-changed=thirdparty/xgrammar/cpp/");
     println!("cargo:rerun-if-changed=thirdparty/xgrammar/include/xgrammar/");
     println!("cargo:rerun-if-changed=thirdparty/xgrammar/3rdparty/dlpack/include/dlpack/");
     println!("cargo:rerun-if-changed=thirdparty/xgrammar/3rdparty/picojson/");

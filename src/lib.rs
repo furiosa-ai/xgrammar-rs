@@ -2015,7 +2015,7 @@ impl Grammar {
     /// Serialize the grammar to a JSON string.
     ///
     /// The output is tied to xgrammar's internal serialization version (v16 as
-    /// of the vendored xgrammar v0.2.7): it can only be read back by
+    /// of the vendored xgrammar v0.2.8): it can only be read back by
     /// [`Self::deserialize_json`] of a build using the same serialization
     /// version.
     ///
