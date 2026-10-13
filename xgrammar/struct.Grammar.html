@@ -299,7 +299,7 @@ This can occur when grammar construction fails or when working with default valu
 <div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">let </span>grammar = Grammar::builtin_json_grammar();
 <span class="macro">assert!</span>(!grammar.is_null());</code></pre></div></div></details><details class="toggle method-toggle" open><summary><section id="method.serialize_json" class="method"><a class="src rightside" href="../src/xgrammar/lib.rs.html#2030-2048">Source</a><h4 class="code-header">pub fn <a href="#method.serialize_json" class="fn">serialize_json</a>(&amp;self) -&gt; <a class="struct" href="https://doc.rust-lang.org/1.96.1/alloc/string/struct.String.html" title="struct alloc::string::String">String</a></h4></section></summary><div class="docblock"><p>Serialize the grammar to a JSON string.</p>
 <p>The output is tied to xgrammar’s internal serialization version (v16 as
-of the vendored xgrammar v0.2.7): it can only be read back by
+of the vendored xgrammar v0.2.8): it can only be read back by
 <a href="struct.Grammar.html#method.deserialize_json" title="associated function xgrammar::Grammar::deserialize_json"><code>Self::deserialize_json</code></a> of a build using the same serialization
 version.</p>
 <h5 id="example-9"><a class="doc-anchor" href="#example-9">§</a>Example</h5>
