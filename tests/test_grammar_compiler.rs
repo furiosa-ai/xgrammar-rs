@@ -48,7 +48,7 @@ fn test_cache_management() {
 
     let schema = json!({"type": "object", "properties": {"name": {"type": "string"}}});
     let _grammar3 = compiler
-        .compile_json_schema(&schema.to_string(), None, None, None, None, None)
+        .compile_json_schema(&schema.to_string(), None, None, None, None, None, None)
         .expect("Failed to compile JSON schema");
     let cache_size_after_schema = compiler.get_cache_size_bytes();
 
@@ -117,7 +117,7 @@ fn test_compile_json_schema() {
 
     // Test with default parameters
     let compiled_grammar = compiler
-        .compile_json_schema(&schema.to_string(), None, None, None, None, None)
+        .compile_json_schema(&schema.to_string(), None, None, None, None, None, None)
         .expect("Failed to compile JSON schema");
     assert!(compiled_grammar.memory_size_bytes() > 0);
     assert_eq!(compiled_grammar.get_tokenizer_info().get_vocab_size(), 102400);
@@ -132,6 +132,7 @@ fn test_compile_json_schema() {
             Some((":".to_string(), ",".to_string())),
             Some(true),
             None,
+            None,
         )
         .expect("Failed to compile JSON schema with custom parameters");
     assert!(compiled_grammar_custom.memory_size_bytes() > 0);
@@ -145,7 +146,7 @@ fn test_compile_json_schema() {
     });
 
     let array_compiled = compiler
-        .compile_json_schema(&array_schema.to_string(), None, None, None, None, None)
+        .compile_json_schema(&array_schema.to_string(), None, None, None, None, None, None)
         .expect("Failed to compile array schema");
     assert!(array_compiled.memory_size_bytes() > 0);
 }
@@ -300,7 +301,7 @@ fn test_compile_json_schema_error() {
     // Test with malformed JSON
     let invalid_json = r#"{ not valid json }"#;
     let Err(XGrammarErr::CompilationError(err_msg)) =
-        compiler.compile_json_schema(invalid_json, None, None, None, None, None)
+        compiler.compile_json_schema(invalid_json, None, None, None, None, None, None)
     else {
         panic!("Expected compilation to fail, but it succeeded");
     };
