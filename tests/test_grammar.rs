@@ -1,7 +1,12 @@
 mod common;
 
 use serde_json::json;
-use xgrammar::{Grammar, XGrammarErr};
+use xgrammar::{
+    Grammar, GrammarCompiler, GrammarMatcher, NamedGrammar, NamedGrammarSource, TokenizerInfo,
+    XGrammarErr,
+};
+
+const GPT_OSS_20B_PRETRAINED_ID: &str = "openai/gpt-oss-20b";
 
 #[test]
 fn test_grammar_from_ebnf() {
@@ -10,6 +15,87 @@ fn test_grammar_from_ebnf() {
     "#;
     let grammar = Grammar::from_ebnf(ebnf, None).unwrap();
     assert!(!grammar.is_null());
+}
+
+#[test]
+fn test_grammar_from_lark() {
+    let lark = r#"
+        start: "a" item+
+        item: "b" | "c"
+    "#;
+    let grammar = Grammar::from_lark(lark, None, None).unwrap();
+    assert!(!grammar.is_null());
+
+    // Token-id sets resolve without tokenizer info.
+    let grammar = Grammar::from_lark("start: <[0-9]> <[^0-4095]>", None, None).unwrap();
+    assert!(!grammar.is_null());
+}
+
+#[test]
+fn test_grammar_from_lark_errors() {
+    let Err(XGrammarErr::InvalidGrammar(err_msg)) = Grammar::from_lark(r#"root: "a""#, None, None)
+    else {
+        panic!("Expected InvalidGrammar for a grammar without a start rule");
+    };
+    assert!(err_msg.contains("Lark error"), "unexpected message: {err_msg}");
+
+    // Named special tokens can only be resolved against a tokenizer.
+    let Err(XGrammarErr::InvalidGrammar(err_msg)) =
+        Grammar::from_lark("start: <|end|>", None, None)
+    else {
+        panic!("Expected InvalidGrammar for a named special token without tokenizer info");
+    };
+    assert!(err_msg.contains("requires tokenizer_info"), "unexpected message: {err_msg}");
+}
+
+/// Named special tokens resolve against the given tokenizer info.
+#[test]
+fn test_grammar_from_lark_with_tokenizer_info() {
+    let tok_info = TokenizerInfo::from_pretrained(GPT_OSS_20B_PRETRAINED_ID, None, None, None)
+        .expect("Failed to load tokenizer info");
+    let token_id = |token: &str| {
+        tok_info.get_decoded_vocab().iter().position(|t| t == token).unwrap_or_else(|| {
+            panic!("token {token} should be in the vocab");
+        }) as i32
+    };
+    let (start, end) = (token_id("<|start|>"), token_id("<|end|>"));
+
+    let grammar = Grammar::from_lark(r#"start: <|start|> "hi" <|end|>"#, Some(&tok_info), None)
+        .expect("Failed to construct Lark grammar with tokenizer info");
+    assert!(!grammar.is_null());
+
+    let compiled_grammar = GrammarCompiler::new(&tok_info).compile_grammar(&grammar).unwrap();
+    let mut matcher = GrammarMatcher::with(&compiled_grammar, None, Some(true), None);
+    assert!(matcher.accept_token(start, None));
+    assert!(matcher.accept_string("hi", None));
+    assert!(matcher.accept_token(end, None));
+    assert!(matcher.is_terminated());
+
+    let Err(XGrammarErr::InvalidGrammar(err_msg)) =
+        Grammar::from_lark("start: <|nope|>", Some(&tok_info), None)
+    else {
+        panic!("Expected InvalidGrammar for an unknown special token");
+    };
+    assert!(err_msg.contains("unknown special token <|nope|>"), "unexpected message: {err_msg}");
+}
+
+#[test]
+fn test_grammar_from_lark_named_grammars() {
+    let item = Grammar::from_lark(r#"start: "b" | "c""#, None, None).unwrap();
+    let named_grammars = [
+        NamedGrammar { name: "item", grammar: NamedGrammarSource::Grammar(&item) },
+        NamedGrammar { name: "tail", grammar: NamedGrammarSource::Lark(r#"start: "z""#) },
+    ];
+    let grammar =
+        Grammar::from_lark(r#"start: "a" @item+ @tail"#, None, Some(&named_grammars)).unwrap();
+    assert!(!grammar.is_null());
+
+    let Err(XGrammarErr::InvalidGrammar(err_msg)) =
+        Grammar::from_lark("start: @missing", None, Some(&named_grammars))
+    else {
+        panic!("Expected InvalidGrammar for an unknown named grammar");
+    };
+    assert!(err_msg.contains("missing"), "unexpected message: {err_msg}");
 }
 
 #[test]
