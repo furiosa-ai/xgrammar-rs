@@ -1,7 +1,10 @@
 mod common;
 
 use serde_json::json;
-use xgrammar::{GrammarCompiler, GrammarMatcher, TokenizerInfo, VocabType, XGrammarErr};
+use xgrammar::{
+    Grammar, GrammarCompiler, GrammarMatcher, NamedGrammar, NamedGrammarSource, TokenizerInfo,
+    VocabType, XGrammarErr,
+};
 
 const EXAONE_4_0_32B_PRETRAINED_ID: &str = "LGAI-EXAONE/EXAONE-4.0-32B";
 const GPT_OSS_20B_PRETRAINED_ID: &str = "openai/gpt-oss-20b";
@@ -183,7 +186,8 @@ fn test_compile_lark() {
         REASON: /[a-z .]+/
         answer: "apple" | "banana"
     "#;
-    let compiled_grammar = compiler.compile_lark(lark).expect("Failed to compile Lark grammar");
+    let compiled_grammar =
+        compiler.compile_lark(lark, None).expect("Failed to compile Lark grammar");
     assert!(compiled_grammar.memory_size_bytes() > 0);
 
     let accepts = |text: &str| {
@@ -210,8 +214,9 @@ fn test_compile_lark_special_tokens() {
 
     let lark =
         format!("start: <|start|> non_special{{0,2}} <|end|>\nnon_special: <[^{start}-{end}]>");
-    let compiled_grammar =
-        compiler.compile_lark(&lark).expect("Failed to compile Lark grammar with special tokens");
+    let compiled_grammar = compiler
+        .compile_lark(&lark, None)
+        .expect("Failed to compile Lark grammar with special tokens");
     let accepts = |token_ids: &[i32]| {
         let mut matcher = GrammarMatcher::with(&compiled_grammar, None, Some(true), None);
         token_ids.iter().all(|&t| matcher.accept_token(t, None)) && matcher.is_terminated()
@@ -224,11 +229,40 @@ fn test_compile_lark_special_tokens() {
     // `<|start|>` and `<|end|>` are excluded from `non_special`.
     assert!(!accepts(&[start, start, end]));
 
-    let Err(XGrammarErr::CompilationError(err_msg)) = compiler.compile_lark("start: <|nope|>")
+    let Err(XGrammarErr::CompilationError(err_msg)) =
+        compiler.compile_lark("start: <|nope|>", None)
     else {
         panic!("Expected compilation to fail for an unknown special token");
     };
     assert!(err_msg.contains("unknown special token <|nope|>"), "unexpected message: {err_msg}");
+}
+
+/// `@name` references resolve against both Grammar objects and Lark sources.
+#[test]
+fn test_compile_lark_named_grammars() {
+    let tok_info = TokenizerInfo::from_pretrained(EXAONE_4_0_32B_PRETRAINED_ID, None, None, None)
+        .expect("Failed to load tokenizer info");
+    let compiler = GrammarCompiler::new(&tok_info);
+
+    let fruit = Grammar::from_lark(r#"start: "apple" | "banana""#, None, None).unwrap();
+    let named_grammars = [
+        NamedGrammar { name: "fruit", grammar: NamedGrammarSource::Grammar(&fruit) },
+        NamedGrammar { name: "count", grammar: NamedGrammarSource::Lark("start: /[0-9]+/") },
+    ];
+    let compiled_grammar = compiler
+        .compile_lark(r#"start: @count " " @fruit"#, Some(&named_grammars))
+        .expect("Failed to compile Lark grammar with named grammars");
+
+    let accepts = |text: &str| {
+        let mut matcher = GrammarMatcher::with(&compiled_grammar, None, Some(true), None);
+        matcher.accept_string(text, None) && matcher.is_terminated()
+    };
+    assert!(accepts("3 apple"));
+    assert!(accepts("12 banana"));
+    assert!(!accepts("3 cherry"));
+    assert!(!accepts("apple"));
+
+    assert!(compiler.compile_lark("start: @missing", Some(&named_grammars)).is_err());
 }
 
 #[test]

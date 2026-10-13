@@ -153,6 +153,37 @@ cpp! {{
         char* error_message;
         int32_t error_kind;
     };
+
+    // Keep the layout in sync with the #[repr(C)] `NamedGrammarArg` mirror on
+    // the Rust side. A non-null `grammar` selects the Grammar alternative of
+    // NamedGrammar::grammar; otherwise `lark_ptr`/`lark_len` hold a Lark source.
+    struct NamedGrammarArg {
+        const uint8_t* name_ptr;
+        size_t name_len;
+        const Grammar* grammar;
+        const uint8_t* lark_ptr;
+        size_t lark_len;
+    };
+
+    static std::vector<NamedGrammar> xgr_named_grammars(
+        const NamedGrammarArg* args, size_t num_args
+    ) {
+        std::vector<NamedGrammar> named_grammars;
+        named_grammars.reserve(num_args);
+        for (size_t i = 0; i < num_args; ++i) {
+            const NamedGrammarArg& arg = args[i];
+            std::string name(reinterpret_cast<const char*>(arg.name_ptr), arg.name_len);
+            if (arg.grammar != nullptr) {
+                named_grammars.push_back({std::move(name), *arg.grammar});
+            } else {
+                named_grammars.push_back({
+                    std::move(name),
+                    std::string(reinterpret_cast<const char*>(arg.lark_ptr), arg.lark_len)
+                });
+            }
+        }
+        return named_grammars;
+    }
 }}
 
 cpp_class!(
@@ -187,6 +218,56 @@ pub enum VocabType {
 pub struct MetadataFromHF {
     pub vocab_type: VocabType,
     pub add_prefix_space: bool,
+}
+
+/// A grammar or Lark source that can be referenced by name (`@name`) from
+/// another Lark grammar. Mirrors `xgrammar::NamedGrammar`.
+///
+/// Passed to [`Grammar::from_lark`] and [`GrammarCompiler::compile_lark`].
+#[derive(Clone, Copy)]
+pub struct NamedGrammar<'a> {
+    /// The reference name, without the leading `@`.
+    pub name: &'a str,
+    /// An existing grammar or a Lark source with its own `start` rule.
+    pub grammar: NamedGrammarSource<'a>,
+}
+
+/// The value of [`NamedGrammar::grammar`]. Mirrors the
+/// `std::variant<Grammar, std::string>` of `xgrammar::NamedGrammar::grammar`.
+#[derive(Clone, Copy)]
+pub enum NamedGrammarSource<'a> {
+    /// An existing grammar.
+    Grammar(&'a Grammar),
+    /// A Lark source with its own `start` rule.
+    Lark(&'a str),
+}
+
+#[repr(C)]
+struct NamedGrammarArg {
+    name_ptr: *const u8,
+    name_len: usize,
+    grammar: *const Grammar,
+    lark_ptr: *const u8,
+    lark_len: usize,
+}
+
+fn named_grammar_args(named_grammars: &[NamedGrammar]) -> Vec<NamedGrammarArg> {
+    named_grammars
+        .iter()
+        .map(|named| {
+            let (grammar, lark) = match named.grammar {
+                NamedGrammarSource::Grammar(grammar) => (grammar as *const Grammar, ""),
+                NamedGrammarSource::Lark(lark) => (std::ptr::null(), lark),
+            };
+            NamedGrammarArg {
+                name_ptr: named.name.as_ptr(),
+                name_len: named.name.len(),
+                grammar,
+                lark_ptr: lark.as_ptr(),
+                lark_len: lark.len(),
+            }
+        })
+        .collect()
 }
 
 /// Helper function to safely extract and free C++ error message.
@@ -1220,6 +1301,8 @@ impl GrammarCompiler {
     ///
     /// # Arguments
     /// * `lark_string` - The Lark grammar. The root rule must be named `start`.
+    /// * `named_grammars` - Grammar objects or Lark sources that can be referenced
+    ///   with `@name` (default: none)
     ///
     /// # Returns
     /// * `Ok(CompiledGrammar)` - A compiled grammar that can be used with GrammarMatcher
@@ -1229,28 +1312,43 @@ impl GrammarCompiler {
     /// * Returns error if the Lark grammar contains syntax errors
     /// * Returns error if the `start` rule is not defined
     /// * Returns error if a special token is unknown to the tokenizer
+    /// * Returns error if an `@name` reference is not in `named_grammars`
     ///
     /// # Example
     /// ```
-    /// # use xgrammar::{GrammarCompiler, TokenizerInfo};
+    /// # use xgrammar::{GrammarCompiler, NamedGrammar, NamedGrammarSource, TokenizerInfo};
     /// # fn example(tokenizer_info: &TokenizerInfo) -> xgrammar::Result<()> {
     /// let compiler = GrammarCompiler::new(tokenizer_info);
-    /// let compiled = compiler.compile_lark(r#"start: "yes" | "no""#)?;
+    /// let compiled = compiler.compile_lark(r#"start: "yes" | "no""#, None)?;
+    ///
+    /// let item = NamedGrammar { name: "item", grammar: NamedGrammarSource::Lark(r#"start: "a""#) };
+    /// let compiled = compiler.compile_lark("start: @item", Some(&[item]))?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn compile_lark(&self, lark_string: &str) -> Result<CompiledGrammar> {
+    pub fn compile_lark(
+        &self,
+        lark_string: &str,
+        named_grammars: Option<&[NamedGrammar]>,
+    ) -> Result<CompiledGrammar> {
         let lark_string_ptr = lark_string.as_ptr();
         let lark_string_len = lark_string.len();
+        let named_grammar_args = named_grammar_args(named_grammars.unwrap_or_default());
+        let named_grammar_args_ptr = named_grammar_args.as_ptr();
+        let num_named_grammars = named_grammar_args.len();
 
         let result = cpp!(unsafe [
             self as "xgrammar::GrammarCompiler*",
             lark_string_ptr as "const uint8_t*",
-            lark_string_len as "size_t"
+            lark_string_len as "size_t",
+            named_grammar_args_ptr as "const NamedGrammarArg*",
+            num_named_grammars as "size_t"
         ] -> CompiledGrammarResult as "CompiledGrammarResult" {
             try {
                 std::string lark_str(reinterpret_cast<const char*>(lark_string_ptr), lark_string_len);
-                auto compiled = self->CompileLark(lark_str);
+                auto compiled = self->CompileLark(
+                    lark_str, xgr_named_grammars(named_grammar_args_ptr, num_named_grammars)
+                );
                 return {true, compiled, nullptr, 0};
             } catch (const std::exception& e) {
                 return {false, CompiledGrammar(NullObj()), strdup(e.what()), xgr_error_kind(e)};
@@ -1428,6 +1526,8 @@ impl Grammar {
     /// * `lark_string` - The Lark grammar. The root rule must be named `start`.
     /// * `tokenizer_info` - Tokenizer used to resolve named special tokens such as
     ///   `<|im_end|>`. Token-id sets such as `<[0-9]>` do not need it.
+    /// * `named_grammars` - Grammar objects or Lark sources that can be referenced
+    ///   with `@name` (default: none)
     ///
     /// # Returns
     /// * `Ok(Grammar)` - A Grammar object constructed from the Lark specification
@@ -1437,30 +1537,45 @@ impl Grammar {
     /// * Returns error if the Lark string contains syntax errors
     /// * Returns error if the `start` rule is not defined
     /// * Returns error if a named special token is used without `tokenizer_info`
+    /// * Returns error if an `@name` reference is not in `named_grammars`
     ///
     /// # Example
     /// ```
-    /// # use xgrammar::Grammar;
+    /// # use xgrammar::{Grammar, NamedGrammar, NamedGrammarSource};
     /// let lark = r#"
     /// start: "Hello, " NAME "!"
     /// NAME: /[A-Z][a-z]+/
     /// "#;
-    /// let grammar = Grammar::from_lark(lark, None).unwrap();
+    /// let grammar = Grammar::from_lark(lark, None, None).unwrap();
+    /// assert!(!grammar.is_null());
+    ///
+    /// // `@name` references resolve against `named_grammars`
+    /// let greeting = NamedGrammar { name: "greeting", grammar: NamedGrammarSource::Grammar(&grammar) };
+    /// let grammar = Grammar::from_lark(r#"start: @greeting "?""#, None, Some(&[greeting])).unwrap();
     /// assert!(!grammar.is_null());
     ///
     /// // A grammar without a `start` rule is rejected
-    /// assert!(Grammar::from_lark(r#"root: "a""#, None).is_err());
+    /// assert!(Grammar::from_lark(r#"root: "a""#, None, None).is_err());
     /// ```
-    pub fn from_lark(lark_string: &str, tokenizer_info: Option<&TokenizerInfo>) -> Result<Self> {
+    pub fn from_lark(
+        lark_string: &str,
+        tokenizer_info: Option<&TokenizerInfo>,
+        named_grammars: Option<&[NamedGrammar]>,
+    ) -> Result<Self> {
         let lark_string_ptr = lark_string.as_ptr();
         let lark_string_len = lark_string.len();
         let tokenizer_info_ptr: *const TokenizerInfo =
             tokenizer_info.map(|t| t as *const TokenizerInfo).unwrap_or(std::ptr::null());
+        let named_grammar_args = named_grammar_args(named_grammars.unwrap_or_default());
+        let named_grammar_args_ptr = named_grammar_args.as_ptr();
+        let num_named_grammars = named_grammar_args.len();
 
         let result = cpp!(unsafe [
             lark_string_ptr as "const uint8_t*",
             lark_string_len as "size_t",
-            tokenizer_info_ptr as "const xgrammar::TokenizerInfo*"
+            tokenizer_info_ptr as "const xgrammar::TokenizerInfo*",
+            named_grammar_args_ptr as "const NamedGrammarArg*",
+            num_named_grammars as "size_t"
         ] -> GrammarResult as "GrammarResult" {
             try {
                 std::optional<xgrammar::TokenizerInfo> opt_tokenizer_info;
@@ -1469,7 +1584,8 @@ impl Grammar {
                 }
                 auto grammar = Grammar::FromLark(
                     string(reinterpret_cast<const char*>(lark_string_ptr), lark_string_len),
-                    opt_tokenizer_info
+                    opt_tokenizer_info,
+                    xgr_named_grammars(named_grammar_args_ptr, num_named_grammars)
                 );
                 return {true, grammar, nullptr, 0};
             } catch (const std::exception& e) {
