@@ -35,3 +35,6 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: make test
+
+      - name: Verify crate package
+        run: cargo package --locked

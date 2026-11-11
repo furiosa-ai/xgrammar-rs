@@ -1,12 +1,12 @@
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::path::{Path, PathBuf};
 
 /// Write a custom config.cmake
-fn generate_config_cmake() {
-    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
+fn generate_config_cmake(out_dir: &Path) {
     let cmake_build_dir = out_dir.join("build");
-    let _ = fs::create_dir_all(&cmake_build_dir);
+    fs::create_dir_all(&cmake_build_dir).expect("create CMake build directory failed");
     let path = cmake_build_dir.join("config.cmake");
     // Turn off Python bindings because we don't need and we don't want to rely on libpython.so.
     let contents = "set(XGRAMMAR_BUILD_PYTHON_BINDINGS OFF CACHE BOOL \"\" FORCE)\n";
@@ -14,7 +14,16 @@ fn generate_config_cmake() {
 }
 
 fn main() {
-    generate_config_cmake();
+    // Cargo's package verification can reuse OUT_DIR for a different source path.
+    // Give each source its own CMake directory so cmake-rs doesn't clear the
+    // config.cmake we just wrote when it detects a changed CMAKE_HOME_DIRECTORY.
+    let mut source_hash = DefaultHasher::new();
+    fs::canonicalize("thirdparty/xgrammar")
+        .expect("xgrammar source missing")
+        .hash(&mut source_hash);
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"))
+        .join(format!("xgrammar-{:x}", source_hash.finish()));
+    generate_config_cmake(&out_dir);
 
     // Running the CMake build for the xgrammar library
     // Note: -Wno-deprecated-declarations is needed because xgrammar uses std::bind internally,
@@ -30,6 +39,7 @@ fn main() {
     };
 
     let xgrammar = cmake::Config::new("thirdparty/xgrammar")
+        .out_dir(&out_dir)
         .define("CMAKE_CXX_COMPILER", "clang++")
         .define("CMAKE_CXX_FLAGS", cxx_flags)
         .build_target("xgrammar")
